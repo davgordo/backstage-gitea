@@ -1,0 +1,75 @@
+# Helm values for deploying the Gitea scaffolder module as an RHDH dynamic backend plugin.
+#
+# Usage (with Helm):
+#   helm upgrade --install rhdh redhat-developer-hub/rhdh \
+#     -f values-rhdh.yaml \
+#     -f values-custom.yaml    # your cluster-specific overrides
+#
+# Usage (with Operator):
+#   Mount this as an extra volume and set the rootDirectory path accordingly.
+
+# --- Dynamic plugins ---
+dynamicPlugins:
+  rootDirectory: dynamic-plugins-root
+  install:
+    - package: '@<scope>/plugin-catalog-backend-module-gitea-dynamic@<catalog_version>'
+      disabled: false
+      integrity: 'sha256-<catalog_hash>'
+    - package: '@<scope>/plugin-scaffolder-backend-module-gitea-dynamic@<scaffolder_version>'
+      disabled: false
+      integrity: 'sha256-<scaffolder_hash>'
+  hosts:
+    - auth:
+        type: npmrc
+        env:
+          # Read npmrc content from an env var (set via a secret)
+          npmrc: RHDH_NPM_NPMRC
+      packages:
+        - 'https://gitea.example.com/api/packages/<scope>/npm/%40<scope>%2Fplugin-catalog-backend-module-gitea-dynamic/-/<catalog_version>/plugin-catalog-backend-module-gitea-dynamic-<catalog_version>.tgz'
+        - 'https://gitea.example.com/api/packages/<scope>/npm/%40<scope>%2Fplugin-scaffolder-backend-module-gitea-dynamic/-/<scaffolder_version>/plugin-scaffolder-backend-module-gitea-dynamic-<scaffolder_version>.tgz'
+# --- Backstage app config (Gitea integration) ---
+upstream:
+  backstage:
+    appConfig:
+      app-config.gitea.yaml: |
+        catalog:
+          providers:
+            gitea:
+              default:
+                instance: gitea
+                schedule:
+                  frequency:
+                    minutes: 30
+                  timeout:
+                    minutes: 15
+                entityRules:
+                  - host: <GITEA_HOST>
+        integrations:
+          gitea:
+            - host: <GITEA_HOST>
+              baseUrl: https://<GITEA_HOST>
+              apiBaseUrl: https://<GITEA_HOST>/api/v1
+              token: ${GITEA_TOKEN}
+        scaffolder:
+          defaultAuthor:
+            name: Backstage Scaffolder
+            email: backstage@example.com
+          defaultOwner:
+            name: platform-team
+    # Mount the Gitea token from a Kubernetes secret
+    extraEnvVarsSecrets:
+      - rhdh-gitea-secrets
+      # Optional: mount the dynamic plugin tarball directly as a volume
+      # extraVolumeMounts:
+      #   - name: gitea-scaffolder-plugin
+      #     mountPath: /opt/backend/dynamic-plugins-root
+      # extraVolumes:
+      #   - name: gitea-scaffolder-plugin
+      #     secret:
+      #       secretName: gitea-scaffolder-plugin
+# --- Gitea-specific secret (create separately) ---
+# ---
+# kubectl create secret generic rhdh-gitea-secrets \
+#   --from-literal=GITEA_TOKEN=<your-personal-access-token> \
+#   -n rhdh
+#

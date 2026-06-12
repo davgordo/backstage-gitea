@@ -1,0 +1,49 @@
+# Action snippets
+
+- id: publish
+  action: publish:gitea
+  input:
+    repoUrl: gitea.apps.example.com?owner=${{ parameters.owner }}&repo=${{ parameters.repo }}
+    description: ${{ parameters.description }}
+    repoVisibility: public
+    defaultBranch: main
+    # Future parity target:
+    # token: ${{ secrets.USER_GITEA_TOKEN }}
+
+- id: webhook
+  action: gitea:webhook
+  input:
+    repoUrl: gitea.apps.example.com?owner=${{ parameters.owner }}&repo=${{ parameters.repo }}
+    webhookUrl: ${{ parameters.webhookUrl }}
+    webhookSecret: ${{ secrets.webhookSecret }}
+    events: ['push']
+    active: true
+    contentType: json
+    insecureSsl: true
+    token: ${{ secrets.USER_GITEA_TOKEN }}
+
+- id: gitops-pr
+  action: publish:gitea:pull-request
+  input:
+    repoUrl: gitea.apps.example.com?owner=${{ parameters.owner }}&repo=${{ parameters.system }}-system
+    branchName: add-${{ parameters.component_id }}
+    targetBranchName: main
+    title: add ${{ parameters.component_id }} component
+    description: add ${{ parameters.component_id }} component
+    sourcePath: ./system-gitops
+    targetPath: .
+    token: ${{ secrets.USER_GITEA_TOKEN }}
+
+- id: branch-protection
+  action: gitea:branch-protection:create
+  input:
+    repoUrl: gitea.apps.example.com?owner=${{ parameters.owner }}&repo=${{ parameters.repo }}
+    branchName: main
+    requiredApprovingReviewCount: 1
+    requireCodeOwnerReviews: true
+    dismissStaleReviews: true
+    requiredStatusCheckContexts:
+      - ci/build
+      - ci/test
+    requiredCommitSigning: false
+    token: ${{ secrets.USER_GITEA_TOKEN }}

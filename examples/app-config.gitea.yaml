@@ -1,0 +1,18 @@
+integrations:
+  gitea:
+    - host: gitea.apps.example.com
+      baseUrl: https://gitea.apps.example.com
+      apiBaseUrl: https://gitea.apps.example.com/api/v1
+      password: ${GITEA_TOKEN}
+
+catalog:
+  providers:
+    gitea:
+      lab:
+        host: gitea.apps.example.com
+        organization: contract-first-idp
+        branch: main
+        catalogPath: /catalog-info.yaml
+        schedule:
+          frequency: { minutes: 30 }
+          timeout: { minutes: 3 }

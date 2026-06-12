@@ -1,0 +1,13 @@
+plugins:
+  - package: '@<scope>/plugin-catalog-backend-module-gitea-dynamic@<catalog_version>'
+    disabled: false
+    integrity: 'sha256-<catalog_hash>'
+    pluginConfig:
+      dynamicPlugins:
+        frontend: {}
+  - package: '@<scope>/plugin-scaffolder-backend-module-gitea-dynamic@<scaffolder_version>'
+    disabled: false
+    integrity: 'sha256-<scaffolder_hash>'
+    pluginConfig:
+      dynamicPlugins:
+        frontend: {}
