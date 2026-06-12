@@ -92,12 +92,8 @@ node -e "
 
 # Create RHDH tarball
 (cd "$PLUGIN_ROOT" && tar czf "$DIST_DIR/catalog-backend-module-gitea-$CATALOG_VERSION.tgz" @backstage/plugin-catalog-backend-module-gitea)
-CATALOG_HASH=$(sha256sum "$DIST_DIR/catalog-backend-module-gitea-$CATALOG_VERSION.tgz" | awk '{print $1}')
-echo "$CATALOG_HASH" > "$DIST_DIR/catalog-backend-module-gitea-$CATALOG_VERSION.tgz.sha256"
-
 echo "  version:  $CATALOG_VERSION"
 echo "  tarball:  catalog-backend-module-gitea-$CATALOG_VERSION.tgz"
-echo "  sha256:   $CATALOG_HASH"
 
 # -------------------------------------------------------------------
 # B) Build scaffolder plugin from LOCAL SOURCE
@@ -144,13 +140,10 @@ node -e "
 
 # Create RHDH tarball
 (cd "$PLUGIN_ROOT" && tar czf "$DIST_DIR/scaffolder-backend-module-gitea-$SCAFFOLDER_VERSION.tgz" @backstage/plugin-scaffolder-backend-module-gitea)
-SCAFFOLDER_HASH=$(sha256sum "$DIST_DIR/scaffolder-backend-module-gitea-$SCAFFOLDER_VERSION.tgz" | awk '{print $1}')
-echo "$SCAFFOLDER_HASH" > "$DIST_DIR/scaffolder-backend-module-gitea-$SCAFFOLDER_VERSION.tgz.sha256"
 SCAFFOLDER_TARBALL="$DIST_DIR/scaffolder-backend-module-gitea-$SCAFFOLDER_VERSION.tgz"
 
 echo "  version:  $SCAFFOLDER_VERSION"
 echo "  tarball:  $(basename "$SCAFFOLDER_TARBALL")"
-echo "  sha256:   $SCAFFOLDER_HASH"
 
 # -------------------------------------------------------------------
 # C) Publish both to Gitea npm registry
@@ -230,15 +223,20 @@ publish_rhdh_tarball "$CATALOG_NPM_PKG" "$CATALOG_VERSION" "$DIST_DIR/catalog-ba
 publish_rhdh_tarball "$SCAFFOLDER_NPM_PKG" "$SCAFFOLDER_VERSION" "$SCAFFOLDER_TARBALL"
 
 # -------------------------------------------------------------------
-# D) Validate by fetching back from registry
+# D) Validate and compute integrity from registry tarballs
 # -------------------------------------------------------------------
 echo ""
-echo "━━━ D) Validating packages on registry ━━━"
+echo "━━━ D) Validating packages and computing integrity ━━━"
 
 # Small delay to let registry index
 sleep 2
 
-validate_from_registry() {
+# Helper to compute sha256 in base64 (SPDX format) from a file
+hex_to_base64() {
+  python3 -c "import sys,binascii,base64; print(base64.b64encode(binascii.unhexlify(sys.argv[1])).decode(), end='')" "$1"
+}
+
+validate_and_hash_from_registry() {
   local pkg_name="$1" pkg_version="$2"
   local VWORK=$(mktemp -d)
 
@@ -276,11 +274,29 @@ validate_from_registry() {
     echo "  ✗ $pkg_name@$pkg_version — missing package.json or dist/"
   fi
 
+  # Compute sha256 in SPDX base64 format from the fetched tarball (what RHDH will download)
+  local hex_hash
+  hex_hash=$(sha256sum "$FTARBALL" | awk '{print $1}')
+  local b64_hash
+  b64_hash=$(hex_to_base64 "$hex_hash")
+  echo "  → integrity: sha256-${b64_hash}"
+
+  # Save the base64 hash so step E can use it
+  echo "$b64_hash" > "$DIST_DIR/${pkg_name##*/}-hash.b64"
+
   rm -rf "$VWORK" "$VEXTRACT"
 }
 
-validate_from_registry "$CATALOG_NPM_PKG" "$CATALOG_VERSION"
-validate_from_registry "$SCAFFOLDER_NPM_PKG" "$SCAFFOLDER_VERSION"
+validate_and_hash_from_registry "$CATALOG_NPM_PKG" "$CATALOG_VERSION"
+validate_and_hash_from_registry "$SCAFFOLDER_NPM_PKG" "$SCAFFOLDER_VERSION"
+
+# Read the computed hashes
+CATALOG_HASH_B64=$(cat "$DIST_DIR/plugin-catalog-backend-module-gitea-dynamic-hash.b64")
+SCAFFOLDER_HASH_B64=$(cat "$DIST_DIR/plugin-scaffolder-backend-module-gitea-dynamic-hash.b64")
+
+echo ""
+echo "  Catalog integrity:    sha256-${CATALOG_HASH_B64}"
+echo "  Scaffolder integrity: sha256-${SCAFFOLDER_HASH_B64}"
 
 # -------------------------------------------------------------------
 # E) Copy templates to dist-config and update with real values
@@ -324,26 +340,26 @@ echo "  scaffolder URL: ${SCAFFOLDER_URL:-(unknown)}"
 if command -v yq &>/dev/null; then
   # yq-based update on dist-config copies
   yq -i ".dynamicPlugins.install[0].package = \"@${NPM_SCOPE}/plugin-catalog-backend-module-gitea-dynamic@${CATALOG_VERSION}\"" "$DIST_CONFIG/values-rhdh.yaml"
-  yq -i ".dynamicPlugins.install[0].integrity = \"sha256-${CATALOG_HASH}\"" "$DIST_CONFIG/values-rhdh.yaml"
+  yq -i ".dynamicPlugins.install[0].integrity = \"sha256-${CATALOG_HASH_B64}\"" "$DIST_CONFIG/values-rhdh.yaml"
   yq -i ".dynamicPlugins.install[1].package = \"@${NPM_SCOPE}/plugin-scaffolder-backend-module-gitea-dynamic@${SCAFFOLDER_VERSION}\"" "$DIST_CONFIG/values-rhdh.yaml"
-  yq -i ".dynamicPlugins.install[1].integrity = \"sha256-${SCAFFOLDER_HASH}\"" "$DIST_CONFIG/values-rhdh.yaml"
+  yq -i ".dynamicPlugins.install[1].integrity = \"sha256-${SCAFFOLDER_HASH_B64}\"" "$DIST_CONFIG/values-rhdh.yaml"
   yq -i ".dynamicPlugins.hosts[0].packages[0] = \"${CATALOG_URL}\"" "$DIST_CONFIG/values-rhdh.yaml"
   yq -i ".dynamicPlugins.hosts[0].packages[1] = \"${SCAFFOLDER_URL}\"" "$DIST_CONFIG/values-rhdh.yaml"
 
   yq -i ".plugins[0].package = \"@${NPM_SCOPE}/plugin-catalog-backend-module-gitea-dynamic@${CATALOG_VERSION}\"" "$DIST_CONFIG/dynamic-plugins.yaml"
-  yq -i ".plugins[0].integrity = \"sha256-${CATALOG_HASH}\"" "$DIST_CONFIG/dynamic-plugins.yaml"
+  yq -i ".plugins[0].integrity = \"sha256-${CATALOG_HASH_B64}\"" "$DIST_CONFIG/dynamic-plugins.yaml"
   yq -i ".plugins[1].package = \"@${NPM_SCOPE}/plugin-scaffolder-backend-module-gitea-dynamic@${SCAFFOLDER_VERSION}\"" "$DIST_CONFIG/dynamic-plugins.yaml"
-  yq -i ".plugins[1].integrity = \"sha256-${SCAFFOLDER_HASH}\"" "$DIST_CONFIG/dynamic-plugins.yaml"
+  yq -i ".plugins[1].integrity = \"sha256-${SCAFFOLDER_HASH_B64}\"" "$DIST_CONFIG/dynamic-plugins.yaml"
 else
   # Node-based YAML update on dist-config copies
   VALUES_FILE="$DIST_CONFIG/values-rhdh.yaml" \
   DYNAMIC_PLUGINS_FILE="$DIST_CONFIG/dynamic-plugins.yaml" \
   NPM_SCOPE="$NPM_SCOPE" \
   CATALOG_VER="$CATALOG_VERSION" \
-  CATALOG_HASH="$CATALOG_HASH" \
+  CATALOG_HASH="$CATALOG_HASH_B64" \
   CATALOG_URL="$CATALOG_URL" \
   SCAFFOLDER_VER="$SCAFFOLDER_VERSION" \
-  SCAFFOLDER_HASH="$SCAFFOLDER_HASH" \
+  SCAFFOLDER_HASH="$SCAFFOLDER_HASH_B64" \
   node << 'NODESCRIPT'
     const fs = require('fs');
     const scope = process.env.NPM_SCOPE;
@@ -399,9 +415,9 @@ echo "  Done — both plugins built, published, validated"
 echo "================================================"
 echo ""
 echo "  Catalog:    @${NPM_SCOPE}/plugin-catalog-backend-module-gitea-dynamic@${CATALOG_VERSION}"
-echo "              sha256: ${CATALOG_HASH}"
+echo "              sha256: sha256-${CATALOG_HASH_B64}"
 echo "  Scaffolder: @${NPM_SCOPE}/plugin-scaffolder-backend-module-gitea-dynamic@${SCAFFOLDER_VERSION}"
-echo "              sha256: ${SCAFFOLDER_HASH}"
+echo "              sha256: sha256-${SCAFFOLDER_HASH_B64}"
 echo ""
 echo "  Registry:   ${NPM_REGISTRY}"
 echo "  Configs:    dist-config/values-rhdh.yaml, dist-config/dynamic-plugins.yaml"
