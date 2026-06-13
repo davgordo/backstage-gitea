@@ -85,7 +85,9 @@ async function cleanupRepo() {
     await api(`/repos/${GITEA_USERNAME}/${TEST_REPO}`, { method: 'DELETE' });
     repoDeleted = true;
     console.log('  🧹 Test repo deleted');
-  } catch {}
+  } catch (error) {
+    console.warn(`  Failed to delete test repo during cleanup: ${error}`);
+  }
 }
 
 // --- Simple mock context (no Jest dependency) ---
@@ -227,7 +229,9 @@ async function main() {
       await api(`/repos/${GITEA_USERNAME}/${TEST_REPO}/git/refs/branches/${branchName}`, {
         method: 'DELETE',
       });
-    } catch {}
+    } catch (error) {
+      console.warn(`    Failed to delete test branch during cleanup: ${error}`);
+    }
   });
 
   // Cleanup workspace
