@@ -15,9 +15,10 @@
  */
 
 import * as scaffolderNode from '@backstage/plugin-scaffolder-node';
+import { InputError } from '@backstage/errors';
 import { ScmIntegrationRegistry } from '@backstage/integration';
 import { z } from 'zod';
-import path from 'path';
+import path from 'node:path';
 import { GiteaClient, resolveGiteaRepo } from './giteaClient';
 
 const schema = z.object({
@@ -66,6 +67,24 @@ function joinRepoPath(targetPath: string, relativePath: string): string {
   return target && target !== '.' ? `${target}/${rel}` : rel;
 }
 
+function resolveWorkspaceSourceDirectory(
+  workspacePath: string,
+  sourcePath: string,
+): string {
+  const requestedPath = path.resolve(workspacePath, sourcePath);
+  const relativePath = path.relative(workspacePath, requestedPath);
+
+  if (
+    relativePath === '..' ||
+    relativePath.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relativePath)
+  ) {
+    throw new InputError('sourcePath must be within the scaffolder workspace');
+  }
+
+  return scaffolderNode.getRepoSourceDirectory(workspacePath, sourcePath);
+}
+
 /**
  * Publishes workspace files to a new branch in an existing Gitea repository and
  * opens a pull request. This intentionally mirrors `publish:github:pull-request`.
@@ -103,8 +122,13 @@ export function createGiteaPullRequestAction(options: Options) {
         );
       }
 
-      const sourceDir = path.resolve(ctx.workspacePath, input.sourcePath);
-      let files = await scaffolderNode.serializeDirectoryContents(sourceDir, { gitignore: true });
+      const sourceDir = resolveWorkspaceSourceDirectory(
+        ctx.workspacePath,
+        input.sourcePath,
+      );
+      const files = await scaffolderNode.serializeDirectoryContents(sourceDir, {
+        gitignore: true,
+      });
       const commitMessage = input.commitMessage ?? input.title;
 
       // Handle createWhenEmpty - skip if no files and not creating when empty

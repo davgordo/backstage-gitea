@@ -63,7 +63,9 @@ describe('publish:gitea:pull-request', () => {
 
   beforeEach(() => {
     // Reset and re-apply default mock for each test
-    serializeSpy.mockResolvedValue([{ path: 'README.md', content: '# Hello' }]);
+    serializeSpy.mockReset().mockResolvedValue([
+      { path: 'README.md', content: '# Hello' },
+    ]);
     action = createGiteaPullRequestAction({ integrations });
   });
 
@@ -206,6 +208,22 @@ describe('publish:gitea:pull-request', () => {
     });
 
     await expect(action.handler(mockContext)).rejects.toThrow();
+  });
+
+  it('should reject a sourcePath outside the workspace', async () => {
+    const mockContext = createMockActionContext({
+      input: {
+        repoUrl: 'gitea.com?owner=owner&repo=repo',
+        branchName: 'feature/path-traversal',
+        title: 'Path traversal',
+        sourcePath: '../outside',
+      },
+    });
+
+    await expect(action.handler(mockContext)).rejects.toThrow(
+      'sourcePath must be within the scaffolder workspace',
+    );
+    expect(serializeSpy).not.toHaveBeenCalled();
   });
 
   it('should delete files before publishing new ones', async () => {
