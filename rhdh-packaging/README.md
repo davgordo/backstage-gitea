@@ -15,25 +15,26 @@ Both packages have `@backstage/*` dependencies migrated to `peerDependencies` fo
 
 ```
 rhdh-packaging/
-├── .npmrc                          # Template — filled at runtime from .env
+├── .npmrc                          # Reference template — never filled with secrets
 ├── .gitignore
 ├── README.md                       # this file
 ├── dynamic-plugins.yaml            # Template — plugin manifest (not modified by publish script)
 ├── values-rhdh.yaml                # Template — Helm values for RHDH deployment
 ├── scripts/
-│   └── publish-both-plugins.sh     # Unified pipeline: decorate → publish → validate → update config
+│   ├── prepare-package.mjs         # Shared npm package metadata transformation
+│   └── publish-both-plugins.sh     # Unified pipeline: stage → publish → validate → update config
 └── smoke-test/
     └── template.yaml               # Scaffolder template to verify all Gitea actions
 ```
 
 Generated artifacts (git-ignored):
-- `dist-rhdh/` — tarballs and SHA-256 sidecars
-- `dynamic-plugins-root/` — unpacked plugin directory structure
-- `dist-config/` — filled-in config files ready for deployment (`values-rhdh.yaml`, `dynamic-plugins.yaml`)
+- `dist-rhdh/` — npm tarballs and SHA-256 sidecars
+- `dynamic-plugins-root/` — staged npm package directories
+- `dist-config/` — deployment-ready `values-rhdh.yaml`, `dynamic-plugins.yaml`, and `npmrc`
 
 ## Prerequisites
 
-1. **Node.js** v20+ and **npm** 10+
+1. **Node.js** v20+, **npm** 10+, and **yq** v4+
 2. **`.env`** file at the project root with:
    ```env
    GITEA_BASE_URL=https://gitea.example.com
@@ -53,11 +54,15 @@ This runs 5 steps end-to-end:
 
 | Step | Action |
 |---|---|
-| **A) Decorate catalog** | Fetch from npmjs, restructure for RHDH, move `@backstage/*` to peerDependencies |
-| **B) Build scaffolder** | Build from local source (`../scaffolder-backend-module-gitea`), restructure for RHDH, move `@backstage/*` to peerDependencies |
+| **A) Stage catalog** | Fetch from npmjs and stage as an RHDH-compatible npm package |
+| **B) Stage scaffolder** | Build from local source and stage as an RHDH-compatible npm package |
 | **C) Publish** | Push both as `@${GITEA_NPM_SCOPE}/*-dynamic` to the Gitea npm registry (skips if already published) |
-| **D) Validate** | Fetch back from registry and verify `package.json` + `dist/` structure |
-| **E) Generate config** | Copy templates, then write versions, SHA-256 hashes, and registry URLs into `dist-config/values-rhdh.yaml` and `dist-config/dynamic-plugins.yaml` |
+| **D) Validate** | Fetch back from registry, strictly verify package identity and structure, and compute integrity |
+| **E) Generate config** | Render versions, SHA-256 hashes, registry URLs, and deployment npm credentials into `dist-config/` |
+
+Both plugins pass through the same package-staging function. The pipeline
+creates standard npm packages directly; it does not construct and re-extract
+intermediate RHDH tarballs.
 
 ## Deploying to RHDH
 
@@ -67,9 +72,9 @@ This runs 5 steps end-to-end:
 # First, generate the config by running the publish script
 cd rhdh-packaging && ./scripts/publish-both-plugins.sh
 
-# Then create the secret from the generated .npmrc
+# Then create the secret from the generated npmrc
 kubectl create secret generic rhdh-npm-scope \
-  --from-literal=npmrc="$(cat rhdh-packaging/.npmrc)" \
+  --from-literal=npmrc="$(cat rhdh-packaging/dist-config/npmrc)" \
   -n rhdh
 ```
 
@@ -120,4 +125,4 @@ The original templates (`values-rhdh.yaml`, `dynamic-plugins.yaml`) are never mo
 |---|---|
 | `E409` on publish | Version already exists on registry — rerun to confirm, or bump version |
 | Integrity mismatch in RHDH | Re-run `publish-both-plugins.sh` to regenerate `dist-config/` files |
-| Network timeout during publish | The script handles retries — rerun from the same directory |
+| Network timeout during publish | Re-run the script from the same directory |

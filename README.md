@@ -71,11 +71,10 @@ cd rhdh-packaging
 ```
 
 This performs 5 steps:
-1. **Decorate catalog** — wraps the catalog plugin from npmjs as an RHDH dynamic plugin (peerDependencies migration)
-2. **Build scaffolder** — builds from local source (`../scaffolder-backend-module-gitea`), restructures for RHDH
+1. **Stage catalog** — fetches the catalog plugin from npmjs and stages an RHDH-compatible npm package
+2. **Stage scaffolder** — builds from local source (`../scaffolder-backend-module-gitea`) and stages the same package format
 3. **Publish** — pushes both tarballs as `@${GITEA_NPM_SCOPE}/*-dynamic` to the Gitea npm registry
 4. **Validate** — fetches both packages back to verify integrity and structure
-5. **Generate config** — copies `values-rhdh.yaml` and `dynamic-plugins.yaml` templates into `dist-config/`, then writes versions, SHA-256 hashes, and registry URLs into those generated files (the original templates remain unmodified)
+5. **Generate config** — writes versions, SHA-256 hashes, registry URLs, and deployment npm credentials into `dist-config/` (the original templates remain unmodified)
 
 The generated files in `dist-config/` are git-ignored. Before deploying, replace `<GITEA_HOST>` in `dist-config/values-rhdh.yaml` with your Gitea hostname.
-
