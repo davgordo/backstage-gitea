@@ -320,6 +320,72 @@ describe('publish:gitea', () => {
     });
   });
 
+  it('should pass the configured signing key when signCommit is enabled', async () => {
+    const signingConfig = new ConfigReader({
+      integrations: {
+        gitea: [
+          {
+            host: 'gitea.com',
+            username: 'gitea_user',
+            password: 'gitea_password',
+            commitSigningKey: 'integration-signing-key',
+          },
+        ],
+      },
+    });
+    const signingAction = createPublishGiteaAction({
+      integrations: ScmIntegrations.fromConfig(signingConfig),
+      config: signingConfig,
+    });
+
+    server.use(
+      rest.get('https://gitea.com/api/v1/orgs/org1', (_req, res, ctx) =>
+        res(ctx.status(200), ctx.json({ id: 1 })),
+      ),
+      rest.get('https://gitea.com/org1/repo/src/branch/main', (_req, res, ctx) =>
+        res(ctx.status(200), ctx.json({})),
+      ),
+      rest.post('https://gitea.com/api/v1/orgs/org1/repos', (_req, res, ctx) =>
+        res(ctx.status(201), ctx.json({})),
+      ),
+      rest.post(
+        'https://gitea.com/api/v1/repos/org1/repo/branch_protections',
+        (_req, res, ctx) => res(ctx.status(200), ctx.json({})),
+      ),
+    );
+
+    await signingAction.handler({
+      ...mockContext,
+      input: {
+        ...mockContext.input,
+        repoUrl: 'gitea.com?repo=repo&owner=org1',
+        signCommit: true,
+      },
+    });
+
+    expect(initRepoAndPush).toHaveBeenCalledWith(
+      expect.objectContaining({
+        signingKey: 'integration-signing-key',
+      }),
+    );
+  });
+
+  it('should reject signCommit when no signing key is configured', async () => {
+    await expect(
+      action.handler({
+        ...mockContext,
+        input: {
+          ...mockContext.input,
+          repoUrl: 'gitea.com?repo=repo&owner=org1',
+          signCommit: true,
+        },
+      }),
+    ).rejects.toThrow(
+      'Signing commits is enabled but no signing key is provided',
+    );
+    expect(initRepoAndPush).not.toHaveBeenCalled();
+  });
+
   afterEach(() => {
     jest.resetAllMocks();
   });

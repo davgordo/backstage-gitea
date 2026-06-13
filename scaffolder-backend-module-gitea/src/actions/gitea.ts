@@ -425,10 +425,18 @@ export function createPublishGiteaAction(options: {
         );
       }
       const { username, password } = integrationConfig.config;
+      const signingKey =
+        integrationConfig.config.commitSigningKey ??
+        config.getOptionalString('scaffolder.defaultCommitSigningKey');
 
       // If a token is not provided, fall back to integration credentials
       if (!token && (!username || !password)) {
         throw new Error(`Credentials for the gitea ${host} required.`);
+      }
+      if (signCommit && !signingKey) {
+        throw new Error(
+          'Signing commits is enabled but no signing key is provided in the configuration',
+        );
       }
 
       // check if the org exists within the gitea server
@@ -457,15 +465,6 @@ export function createPublishGiteaAction(options: {
           : config.getOptionalString('scaffolder.defaultAuthor.email'),
       };
 
-      const signingKey =
-        integrationConfig.config.commitSigningKey ??
-        config.getOptionalString('scaffolder.defaultCommitSigningKey');
-      if (signCommit && !signingKey) {
-        throw new Error(
-          'Signing commits is enabled but no signing key is provided in the configuration',
-        );
-      }
-
       // The owner to be used should be either the org name or user authenticated with the gitea server
       const remoteUrl = `${integrationConfig.config.baseUrl}/${owner}/${repo}.git`;
       const commitResult = await initRepoAndPush({
@@ -476,6 +475,7 @@ export function createPublishGiteaAction(options: {
         logger: ctx.logger,
         commitMessage: generateCommitMessage(config, gitCommitMessage),
         gitAuthorInfo,
+        ...(signCommit ? { signingKey } : {}),
       });
 
       // Check if the gitea repo URL is available before to exit
