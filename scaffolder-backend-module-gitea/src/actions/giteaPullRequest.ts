@@ -159,6 +159,7 @@ export function createGiteaPullRequestAction(options: Options) {
 
       if (files.length > 0) {
         ctx.logger.info(`Publishing ${files.length} files to ${repo.owner}/${repo.repo}:${input.branchName}`);
+        let sourceBranchReady = false;
 
         for (const file of files) {
           const repoFilePath = joinRepoPath(input.targetPath, file.path);
@@ -181,6 +182,9 @@ export function createGiteaPullRequestAction(options: Options) {
 
           if (existingSha) {
             payload.sha = existingSha;
+            sourceBranchReady = true;
+          } else if (sourceBranchReady) {
+            payload.branch = input.branchName;
           } else {
             payload.ref = input.targetBranchName;
             payload.new_branch = input.branchName;
@@ -191,6 +195,7 @@ export function createGiteaPullRequestAction(options: Options) {
             method,
             body: JSON.stringify(payload),
           });
+          sourceBranchReady = true;
         }
       }
 

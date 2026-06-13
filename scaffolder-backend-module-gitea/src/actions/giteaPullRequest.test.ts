@@ -157,6 +157,57 @@ describe('publish:gitea:pull-request', () => {
     expect(mockContext.output).toHaveBeenCalledWith('pullRequestNumber', 3);
   });
 
+  it('should create a new branch only once when publishing multiple files', async () => {
+    serializeSpy.mockResolvedValue([
+      { path: 'README.md', content: '# Hello' },
+      { path: 'catalog-info.yaml', content: 'apiVersion: backstage.io/v1alpha1' },
+    ]);
+
+    const capturedPayloads: Record<string, unknown>[] = [];
+    server.use(
+      rest.get('https://gitea.com/api/v1/repos/:owner/:repo/contents/*', (_req, res, ctx) => {
+        return res(ctx.status(404), ctx.text('not found'));
+      }),
+      rest.post('https://gitea.com/api/v1/repos/:owner/:repo/contents/*', async (req, res, ctx) => {
+        capturedPayloads.push(await req.json());
+        return res(
+          ctx.status(200),
+          ctx.set('Content-Type', 'application/json'),
+          ctx.json({ sha: 'abc123' }),
+        );
+      }),
+      rest.post('https://gitea.com/api/v1/repos/:owner/:repo/pulls', (_req, res, ctx) => {
+        return res(
+          ctx.status(200),
+          ctx.set('Content-Type', 'application/json'),
+          ctx.json({ number: 4, html_url: 'https://gitea.com/owner/repo/pulls/4' }),
+        );
+      }),
+    );
+
+    const mockContext = createMockActionContext({
+      input: {
+        repoUrl: 'gitea.com?owner=owner&repo=repo',
+        branchName: 'feature/multiple-files',
+        targetBranchName: 'develop',
+        title: 'Multiple files',
+      },
+    });
+
+    await action.handler(mockContext);
+
+    expect(capturedPayloads).toHaveLength(2);
+    expect(capturedPayloads[0]).toMatchObject({
+      ref: 'develop',
+      new_branch: 'feature/multiple-files',
+    });
+    expect(capturedPayloads[1]).toMatchObject({
+      branch: 'feature/multiple-files',
+    });
+    expect(capturedPayloads[1].ref).toBeUndefined();
+    expect(capturedPayloads[1].new_branch).toBeUndefined();
+  });
+
   it('should use existing file sha when updating', async () => {
     let capturedPayload: Record<string, unknown> | undefined;
     server.use(
