@@ -34,6 +34,11 @@ export type ResolveGiteaRepoOptions = {
   integrations: ScmIntegrationRegistry;
 };
 
+type GiteaIntegrationConfigWithApiBaseUrl = {
+  baseUrl?: string;
+  apiBaseUrl?: string;
+};
+
 export function resolveGiteaRepo(options: ResolveGiteaRepoOptions): GiteaRepo {
   const { host, owner, repo } = parseRepoUrl(options.repoUrl, options.integrations as any);
 
@@ -46,8 +51,12 @@ export function resolveGiteaRepo(options: ResolveGiteaRepoOptions): GiteaRepo {
     throw new InputError(`No Gitea integration configured for host ${host}`);
   }
 
-  const baseUrl = integration.config.baseUrl?.replace(/\/$/, '') ?? `https://${host}`;
-  const apiBaseUrl = `${baseUrl}/api/v1`;
+  const integrationConfig =
+    integration.config as GiteaIntegrationConfigWithApiBaseUrl;
+  const baseUrl =
+    integrationConfig.baseUrl?.replace(/\/$/, '') ?? `https://${host}`;
+  const apiBaseUrl =
+    integrationConfig.apiBaseUrl?.replace(/\/$/, '') ?? `${baseUrl}/api/v1`;
 
   return {
     host,
