@@ -49,7 +49,10 @@ describe('gitea:branch-protection:create', () => {
     server.use(
       rest.post(
         'https://gitea.com/api/v1/repos/:owner/:repo/branch_protections',
-        (_req, res, ctx) => {
+        (req, res, ctx) => {
+          expect(req.headers.get('Authorization')).toBe(
+            `basic ${Buffer.from('gitea_user:gitea_password').toString('base64')}`,
+          );
           return res(
             ctx.status(200),
             ctx.set('Content-Type', 'application/json'),

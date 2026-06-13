@@ -74,7 +74,10 @@ describe('publish:gitea:pull-request', () => {
       rest.get('https://gitea.com/api/v1/repos/:owner/:repo/contents/*', (_req, res, ctx) => {
         return res(ctx.status(404), ctx.text('not found'));
       }),
-      rest.post('https://gitea.com/api/v1/repos/:owner/:repo/contents/*', (_req, res, ctx) => {
+      rest.post('https://gitea.com/api/v1/repos/:owner/:repo/contents/*', (req, res, ctx) => {
+        expect(req.headers.get('Authorization')).toBe(
+          `basic ${Buffer.from('gitea_user:gitea_password').toString('base64')}`,
+        );
         return res(
           ctx.status(200),
           ctx.set('Content-Type', 'application/json'),

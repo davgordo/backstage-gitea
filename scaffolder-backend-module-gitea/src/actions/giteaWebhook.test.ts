@@ -49,7 +49,10 @@ describe('gitea:webhook', () => {
     server.use(
       rest.post(
         'https://gitea.com/api/v1/repos/:owner/:repo/hooks',
-        (_req, res, ctx) => {
+        (req, res, ctx) => {
+          expect(req.headers.get('Authorization')).toBe(
+            `basic ${Buffer.from('gitea_user:gitea_password').toString('base64')}`,
+          );
           return res(
             ctx.status(200),
             ctx.set('Content-Type', 'application/json'),
@@ -74,6 +77,33 @@ describe('gitea:webhook', () => {
       'hookUrl',
       'https://gitea.com/api/v1/repos/owner/repo/hooks/42',
     );
+  });
+
+  it('should prefer an input token over integration credentials', async () => {
+    server.use(
+      rest.post(
+        'https://gitea.com/api/v1/repos/:owner/:repo/hooks',
+        (req, res, ctx) => {
+          expect(req.headers.get('Authorization')).toBe('token user-token');
+          return res(
+            ctx.status(200),
+            ctx.set('Content-Type', 'application/json'),
+            ctx.json({ id: 43 }),
+          );
+        },
+      ),
+    );
+
+    const mockContext = createMockActionContext({
+      input: {
+        repoUrl: 'gitea.com?owner=owner&repo=repo',
+        webhookUrl: 'https://tekton.example.com/webhook',
+        token: 'user-token',
+      },
+    });
+
+    await action.handler(mockContext);
+    expect(mockContext.output).toHaveBeenCalledWith('hookId', 43);
   });
 
   it('should include the secret and content type in the webhook config', async () => {

@@ -19,7 +19,7 @@ import { InputError } from '@backstage/errors';
 import { ScmIntegrationRegistry } from '@backstage/integration';
 import { z } from 'zod';
 import path from 'node:path';
-import { GiteaClient, resolveGiteaRepo } from './giteaClient';
+import { createGiteaClient } from './giteaClient';
 
 const schema = z.object({
   repoUrl: z.string().describe('Target repository URL in Backstage repoUrl format'),
@@ -112,8 +112,11 @@ export function createGiteaPullRequestAction(options: Options) {
     },
     async handler(ctx) {
       const input = schema.parse(ctx.input);
-      const repo = resolveGiteaRepo({ repoUrl: input.repoUrl, integrations: options.integrations });
-      const client = new GiteaClient({ repo, token: input.token });
+      const { repo, client } = createGiteaClient({
+        repoUrl: input.repoUrl,
+        integrations: options.integrations,
+        token: input.token,
+      });
 
       // Log warning for git author params that Gitea Contents API doesn't support
       if (input.gitAuthorName || input.gitAuthorEmail || input.forceEmptyGitAuthor) {

@@ -17,7 +17,7 @@
 import { createTemplateAction } from '@backstage/plugin-scaffolder-node';
 import { ScmIntegrationRegistry } from '@backstage/integration';
 import { z } from 'zod';
-import { GiteaClient, resolveGiteaRepo } from './giteaClient';
+import { createGiteaClient } from './giteaClient';
 
 const schema = z.object({
   repoUrl: z.string().describe('Repository URL in Backstage repoUrl format, e.g. gitea.example.com?owner=org&repo=name'),
@@ -61,8 +61,11 @@ export function createGiteaWebhookAction(options: Options) {
     },
     async handler(ctx) {
       const input = schema.parse(ctx.input);
-      const repo = resolveGiteaRepo({ repoUrl: input.repoUrl, integrations: options.integrations });
-      const client = new GiteaClient({ repo, token: input.token });
+      const { repo, client } = createGiteaClient({
+        repoUrl: input.repoUrl,
+        integrations: options.integrations,
+        token: input.token,
+      });
 
       const body = {
         type: 'gitea',

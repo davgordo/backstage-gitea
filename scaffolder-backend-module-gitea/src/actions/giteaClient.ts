@@ -15,7 +15,10 @@
  */
 
 import { InputError } from '@backstage/errors';
-import { ScmIntegrationRegistry } from '@backstage/integration';
+import {
+  getGiteaRequestOptions,
+  ScmIntegrationRegistry,
+} from '@backstage/integration';
 import { parseRepoUrl } from '@backstage/plugin-scaffolder-node';
 
 export type GiteaRepo = {
@@ -59,6 +62,10 @@ export type GiteaClientOptions = {
   repo: GiteaRepo;
   token?: string;
   defaultHeaders?: Record<string, string>;
+};
+
+export type CreateGiteaClientOptions = ResolveGiteaRepoOptions & {
+  token?: string;
 };
 
 export class GiteaClient {
@@ -106,4 +113,25 @@ export class GiteaClient {
     const encodedRepo = encodeURIComponent(this.repo.repo);
     return `/repos/${encodedOwner}/${encodedRepo}${path}`;
   }
+}
+
+export function createGiteaClient(options: CreateGiteaClientOptions): {
+  repo: GiteaRepo;
+  client: GiteaClient;
+} {
+  const repo = resolveGiteaRepo(options);
+  const integration = options.integrations.gitea.byHost(repo.host);
+
+  if (!integration) {
+    throw new InputError(`No Gitea integration configured for host ${repo.host}`);
+  }
+
+  return {
+    repo,
+    client: new GiteaClient({
+      repo,
+      token: options.token,
+      defaultHeaders: getGiteaRequestOptions(integration.config).headers,
+    }),
+  };
 }

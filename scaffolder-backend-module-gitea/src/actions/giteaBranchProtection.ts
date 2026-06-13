@@ -17,7 +17,7 @@
 import { createTemplateAction } from '@backstage/plugin-scaffolder-node';
 import { ScmIntegrationRegistry } from '@backstage/integration';
 import { z } from 'zod';
-import { GiteaClient, resolveGiteaRepo } from './giteaClient';
+import { createGiteaClient, GiteaClient } from './giteaClient';
 
 export type BranchProtectionOptions = {
   repoUrl: string;
@@ -189,8 +189,11 @@ export function createGiteaBranchProtectionAction(options: Options) {
       // Support `branch` as an alias for `branchName`
       const branchName = input.branch ?? input.branchName;
 
-      const repo = resolveGiteaRepo({ repoUrl: input.repoUrl, integrations: options.integrations });
-      const client = new GiteaClient({ repo, token: input.token });
+      const { client } = createGiteaClient({
+        repoUrl: input.repoUrl,
+        integrations: options.integrations,
+        token: input.token,
+      });
 
       const protectionOptions: BranchProtectionOptions = {
         repoUrl: input.repoUrl,
