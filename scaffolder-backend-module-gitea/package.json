@@ -39,7 +39,8 @@
     "prepack": "backstage-cli package prepack",
     "postpack": "backstage-cli package postpack",
     "start": "backstage-cli package start",
-    "test": "NODE_OPTIONS='--no-deprecation' backstage-cli package test"
+    "test": "NODE_OPTIONS='--no-deprecation' backstage-cli package test --no-watch",
+    "test:watch": "NODE_OPTIONS='--no-deprecation' backstage-cli package test --watch"
   },
   "dependencies": {
     "@backstage/config": "^1.2.0",
