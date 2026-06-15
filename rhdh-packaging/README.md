@@ -4,12 +4,14 @@ Packages the Gitea catalog and scaffolder modules as **RHDH dynamic plugins** an
 
 ## What's Published
 
-| Plugin | Source | Version (RHDH 1.9.4) |
+| Plugin | Source | Version (RHDH 1.10.1 / Backstage 1.49.4) |
 |---|---|---|
-| `@${GITEA_NPM_SCOPE}/plugin-catalog-backend-module-gitea-dynamic` | `@backstage/*` from npmjs | 0.1.6 |
-| `@${GITEA_NPM_SCOPE}/plugin-scaffolder-backend-module-gitea-dynamic` | Local source (`../scaffolder-backend-module-gitea`) | local version |
+| `@${GITEA_NPM_SCOPE}/plugin-catalog-backend-module-gitea-dynamic` | Upstream 0.1.10 from npmjs | 0.1.10-rhdh.1.10.1.1 |
+| `@${GITEA_NPM_SCOPE}/plugin-scaffolder-backend-module-gitea-dynamic` | Local custom source based on upstream 0.2.19 | 0.2.19-rhdh.1.10.1.1 |
 
 Both packages have `@backstage/*` dependencies migrated to `peerDependencies` for RHDH compatibility.
+Published versions use the suffix `-rhdh.<target-version>.<revision>` to make
+their intended RHDH runtime and custom packaging revision explicit.
 
 ## Directory Layout
 
@@ -34,7 +36,7 @@ Generated artifacts (git-ignored):
 
 ## Prerequisites
 
-1. **Node.js** v20+, **npm** 10+, and **yq** v4+
+1. **Node.js** v24, **npm** 10+, and **yq** v4+
 2. **`.env`** file at the project root with:
    ```env
    GITEA_BASE_URL=https://gitea.example.com
@@ -42,6 +44,72 @@ Generated artifacts (git-ignored):
    GITEA_NPM_SCOPE=<your-npm-scope>
    ```
    `GITEA_NPM_SCOPE` is the npm scope/organization (e.g., `nusun`) used for published package names (`@$GITEA_NPM_SCOPE/...`).
+
+## Targeting a Different RHDH Version
+
+Dynamic plugin compatibility follows the complete runtime package set, not
+just the RHDH version number:
+
+```text
+RHDH version -> Backstage version -> matching upstream plugin versions
+```
+
+Do not automatically use the latest Gitea plugin releases. First identify the
+Backstage version used by the target RHDH release, then use the Gitea module
+versions contained in that exact Backstage release.
+
+For example, RHDH `1.10.1` uses Backstage `1.49.4`, which contains:
+
+| Module | Matching upstream version |
+|---|---|
+| `@backstage/plugin-catalog-backend-module-gitea` | `0.1.10` |
+| `@backstage/plugin-scaffolder-backend-module-gitea` | `0.2.19` |
+
+To target another RHDH version:
+
+1. Find the target RHDH release branch or tag in the
+   [`redhat-developer/rhdh`](https://github.com/redhat-developer/rhdh)
+   repository.
+2. Read `backstage.json` from that release to find its Backstage version.
+3. Inspect the matching Backstage tag to identify the catalog and scaffolder
+   Gitea module versions and their `@backstage/*` dependency versions.
+4. Rebase or compare the local scaffolder customizations against that upstream
+   scaffolder module version. Preserve the local actions, but review any
+   material upstream source changes before carrying them forward.
+5. Update `scaffolder-backend-module-gitea/package.json`:
+   - Set the package version to
+     `<upstream-version>-rhdh.<target-rhdh-version>.<revision>`.
+   - Align `dependencies`, `peerDependencies`, and `devDependencies` with the
+     target Backstage release.
+6. Update `CATALOG_SOURCE_VERSION` and `CATALOG_VERSION` in
+   `scripts/publish-both-plugins.sh`:
+
+   ```bash
+   CATALOG_SOURCE_VERSION="<matching-upstream-version>"
+   CATALOG_VERSION="<matching-upstream-version>-rhdh.<target-rhdh-version>.<revision>"
+   ```
+
+7. Update the version table and Node.js prerequisite in this README.
+8. Run the module build, lint, and tests before publishing:
+
+   ```bash
+   cd scaffolder-backend-module-gitea
+   npm install --no-package-lock
+   npm run build
+   npm run lint
+   npm test -- --runInBand
+   ```
+
+9. Run the publishing pipeline and deploy using the newly generated
+   `dist-config/` files.
+10. Run the RHDH smoke-test template against the target RHDH installation.
+
+Increment the final revision component whenever packaging, metadata, or local
+source changes require a new artifact for the same RHDH target. For example:
+
+```text
+0.2.19-rhdh.1.10.1.1 -> 0.2.19-rhdh.1.10.1.2
+```
 
 ## One-Command Pipeline
 

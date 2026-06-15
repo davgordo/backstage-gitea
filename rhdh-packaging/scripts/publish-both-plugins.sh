@@ -13,7 +13,8 @@ STAGE_ROOT="$SCRIPT_DIR/dynamic-plugins-root"
 LOCAL_SCAFFOLDER_DIR="$PROJECT_ROOT/scaffolder-backend-module-gitea"
 
 CATALOG_SOURCE="@backstage/plugin-catalog-backend-module-gitea"
-CATALOG_VERSION="0.1.6"
+CATALOG_SOURCE_VERSION="0.1.10"
+CATALOG_VERSION="0.1.10-rhdh.1.10.1.1"
 
 if [ -f "$PROJECT_ROOT/.env" ]; then
   set -a
@@ -193,10 +194,10 @@ echo "A) Fetching and staging catalog plugin"
 CATALOG_SOURCE_ROOT="$WORK_ROOT/catalog-source"
 mkdir -p "$CATALOG_SOURCE_ROOT"
 if ! CATALOG_TARBALL="$(cd "$CATALOG_SOURCE_ROOT" && npm pack \
-    "$CATALOG_SOURCE@$CATALOG_VERSION" \
+    "$CATALOG_SOURCE@$CATALOG_SOURCE_VERSION" \
     --registry=https://registry.npmjs.org \
     --silent)"; then
-  echo "ERROR: failed to fetch $CATALOG_SOURCE@$CATALOG_VERSION from npmjs"
+  echo "ERROR: failed to fetch $CATALOG_SOURCE@$CATALOG_SOURCE_VERSION from npmjs"
   exit 1
 fi
 tar xzf "$CATALOG_SOURCE_ROOT/$CATALOG_TARBALL" -C "$CATALOG_SOURCE_ROOT"

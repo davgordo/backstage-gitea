@@ -1,76 +1,15 @@
 # @backstage/plugin-scaffolder-backend-module-gitea
 
-## 0.2.22-next.0
+## 0.2.19-rhdh.1.10.1.1
 
 ### Patch Changes
 
-- Updated dependencies
-  - @backstage/integration@2.0.3-next.0
-  - @backstage/plugin-scaffolder-node@0.13.4-next.0
-  - @backstage/backend-plugin-api@1.9.2-next.0
-
-## 0.2.21
-
-### Patch Changes
-
-- Updated dependencies
-  - @backstage/errors@1.3.1
-  - @backstage/backend-plugin-api@1.9.1
-  - @backstage/integration@2.0.2
-  - @backstage/plugin-scaffolder-node@0.13.3
-  - @backstage/config@1.3.8
-
-## 0.2.21-next.0
-
-### Patch Changes
-
-- Updated dependencies
-  - @backstage/errors@1.3.1-next.0
-  - @backstage/integration@2.0.2-next.0
-  - @backstage/backend-plugin-api@1.9.1-next.0
-  - @backstage/config@1.3.8-next.0
-  - @backstage/plugin-scaffolder-node@0.13.3-next.0
-
-## 0.2.20
-
-### Patch Changes
-
-- Updated dependencies
-  - @backstage/backend-plugin-api@1.9.0
-  - @backstage/errors@1.3.0
-  - @backstage/plugin-scaffolder-node@0.13.2
-  - @backstage/integration@2.0.1
-  - @backstage/config@1.3.7
-
-## 0.2.20-next.2
-
-### Patch Changes
-
-- Updated dependencies
-  - @backstage/errors@1.3.0-next.0
-  - @backstage/plugin-scaffolder-node@0.13.2-next.2
-  - @backstage/integration@2.0.1-next.0
-  - @backstage/backend-plugin-api@1.9.0-next.2
-  - @backstage/config@1.3.7-next.0
-
-## 0.2.20-next.1
-
-### Patch Changes
-
-- Updated dependencies
-  - @backstage/backend-plugin-api@1.9.0-next.1
-  - @backstage/plugin-scaffolder-node@0.13.1-next.1
-
-## 0.2.20-next.0
-
-### Patch Changes
-
-- Updated dependencies
-  - @backstage/backend-plugin-api@1.8.1-next.0
-  - @backstage/plugin-scaffolder-node@0.13.1-next.0
-  - @backstage/config@1.3.6
-  - @backstage/errors@1.2.7
-  - @backstage/integration@2.0.0
+- Rebased the custom Gitea actions on the upstream `0.2.19` release included
+  with Backstage `1.49.4`, the baseline used by RHDH `1.10.1`.
+- Preserved the custom webhook, pull request, branch protection, configurable
+  API base URL, integration credential fallback, and signed commit behavior.
+- Updated development and peer dependencies to the RHDH `1.10.1` Backstage
+  package set.
 
 ## 0.2.19
 
