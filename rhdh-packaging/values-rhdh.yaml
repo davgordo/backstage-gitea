@@ -49,7 +49,8 @@ upstream:
             - host: <GITEA_HOST>
               baseUrl: https://<GITEA_HOST>
               apiBaseUrl: https://<GITEA_HOST>/api/v1
-              token: ${GITEA_TOKEN}
+              # Backstage treats password without username as a Gitea HTTP token.
+              password: ${GITEA_TOKEN}
         scaffolder:
           defaultAuthor:
             name: Backstage Scaffolder

@@ -29,7 +29,7 @@ const schema = z.object({
   httpMethod: z.enum(['post']).default('post'),
   insecureSsl: z.boolean().default(false).describe('When true, disables TLS verification for the hook target'),
   branchFilter: z.string().optional().describe('Optional branch filter supported by Gitea hooks'),
-  token: z.string().optional().describe('Optional user or task token. If omitted, use configured integration credentials when wired upstream.'),
+  token: z.string().optional().describe('Optional user or task token. When provided, it overrides configured integration credentials.'),
 });
 
 type Input = z.infer<typeof schema>;

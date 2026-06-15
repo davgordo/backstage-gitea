@@ -206,7 +206,7 @@ Creates a webhook on an existing Gitea repository so that Gitea calls a target U
 | `httpMethod` | `post` | No | `post` | HTTP method for the webhook |
 | `insecureSsl` | boolean | No | `false` | When true, disables TLS verification for the hook target |
 | `branchFilter` | string | No | — | Optional branch filter supported by Gitea hooks |
-| `token` | string | No | — | Optional user or task token. If omitted, use configured integration credentials |
+| `token` | string | No | — | Optional user or task token. When provided, it overrides configured integration credentials |
 
 **Outputs**
 
@@ -246,7 +246,7 @@ Publishes workspace files to a new branch in an existing Gitea repository and op
 | `sourcePath` | string | No | `.` | Workspace subdirectory containing files to publish |
 | `targetPath` | string | No | `.` | Target subdirectory in the repository |
 | `commitMessage` | string | No | `title` value | Commit message for file changes |
-| `token` | string | No | — | Optional authentication token |
+| `token` | string | No | — | Optional authentication token. When provided, it overrides configured integration credentials |
 | `draft` | boolean | No | `false` | Reserved for Gitea versions that support draft PRs |
 | `filesToDelete` | string[] | No | `[]` | List of file paths to delete from the target branch |
 | `reviewers` | string[] | No | `[]` | List of user logins to request as reviewers on the PR |
@@ -295,7 +295,7 @@ Applies branch protection rules (required approvals, status checks, signed commi
 | `repoUrl` | string | Yes | — | Repository URL in Backstage repoUrl format |
 | `branchName` | string | No | `main` | The branch to protect |
 | `branch` | string | No | — | Alias for `branchName` (GitHub parity) |
-| `token` | string | No | — | Optional authentication token |
+| `token` | string | No | — | Optional authentication token. When provided, it overrides configured integration credentials |
 | `protectDefaultBranch` | boolean | No | — | Compatibility flag. If `false`, the action is a no-op. When omitted, branch protection is applied. |
 | `protectEnforceAdmins` | boolean | No | `false` | Enforce branch protection for administrators |
 | `enforceAdmins` | boolean | No | — | Alias for `protectEnforceAdmins` (GitHub parity); resolved as `enforceAdmins ?? protectEnforceAdmins ?? false` |

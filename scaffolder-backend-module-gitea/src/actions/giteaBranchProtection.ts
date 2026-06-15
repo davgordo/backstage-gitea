@@ -49,7 +49,7 @@ export type BranchProtectionOptions = {
 const schema = z.object({
   repoUrl: z.string(),
   branchName: z.string().default('main'),
-  token: z.string().optional(),
+  token: z.string().optional().describe('Optional user or task token. When provided, it overrides configured integration credentials.'),
 
   // GitHub parity: `branch` is an alias for `branchName`
   branch: z.string().optional(),

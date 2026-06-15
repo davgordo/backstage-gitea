@@ -30,7 +30,7 @@ const schema = z.object({
   sourcePath: z.string().default('.').describe('Workspace subdirectory containing files to publish'),
   targetPath: z.string().default('.').describe('Target subdirectory in the repository'),
   commitMessage: z.string().optional(),
-  token: z.string().optional(),
+  token: z.string().optional().describe('Optional user or task token. When provided, it overrides configured integration credentials.'),
   draft: z.boolean().default(false).describe('Reserved for Gitea versions that support draft PRs'),
   // Additional params for parity with publish:github:pull-request
   filesToDelete: z.array(z.string()).default([]).describe('List of file paths to delete from the target branch'),

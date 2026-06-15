@@ -182,7 +182,8 @@ integrations:
     - host: gitea.example.com
       baseUrl: https://gitea.example.com
       apiBaseUrl: https://gitea.example.com/api/v1
-      token: ${GITEA_TOKEN}
+      # Backstage treats password without username as a Gitea HTTP token.
+      password: ${GITEA_TOKEN}
 ```
 
 The original templates (`values-rhdh.yaml`, `dynamic-plugins.yaml`) are never modified by the publish script.

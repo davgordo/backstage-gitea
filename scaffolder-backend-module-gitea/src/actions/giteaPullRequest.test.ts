@@ -117,6 +117,42 @@ describe('publish:gitea:pull-request', () => {
     expect(mockContext.output).toHaveBeenCalledWith('targetBranchName', 'main');
   });
 
+  it('should prefer an input token over integration credentials', async () => {
+    server.use(
+      rest.get('https://gitea.com/api/v1/repos/:owner/:repo/contents/*', (_req, res, ctx) => {
+        return res(ctx.status(404), ctx.text('not found'));
+      }),
+      rest.post('https://gitea.com/api/v1/repos/:owner/:repo/contents/*', (req, res, ctx) => {
+        expect(req.headers.get('Authorization')).toBe('token user-token');
+        return res(
+          ctx.status(200),
+          ctx.set('Content-Type', 'application/json'),
+          ctx.json({ sha: 'abc123' }),
+        );
+      }),
+      rest.post('https://gitea.com/api/v1/repos/:owner/:repo/pulls', (req, res, ctx) => {
+        expect(req.headers.get('Authorization')).toBe('token user-token');
+        return res(
+          ctx.status(200),
+          ctx.set('Content-Type', 'application/json'),
+          ctx.json({ number: 1, html_url: 'https://gitea.com/owner/repo/pulls/1' }),
+        );
+      }),
+    );
+
+    const mockContext = createMockActionContext({
+      input: {
+        repoUrl: 'gitea.com?owner=owner&repo=repo',
+        branchName: 'feature/user-token',
+        title: 'Use user token',
+        token: 'user-token',
+      },
+    });
+
+    await action.handler(mockContext);
+    expect(mockContext.output).toHaveBeenCalledWith('pullRequestNumber', 1);
+  });
+
   it('should use ref and new_branch for new branch creation', async () => {
     let capturedPayload: Record<string, unknown> | undefined;
     server.use(

@@ -76,6 +76,33 @@ describe('gitea:branch-protection:create', () => {
     expect(mockContext.output).toHaveBeenCalledWith('branchName', 'main');
   });
 
+  it('should prefer an input token over integration credentials', async () => {
+    server.use(
+      rest.post(
+        'https://gitea.com/api/v1/repos/:owner/:repo/branch_protections',
+        (req, res, ctx) => {
+          expect(req.headers.get('Authorization')).toBe('token user-token');
+          return res(
+            ctx.status(200),
+            ctx.set('Content-Type', 'application/json'),
+            ctx.json({ branch_name: 'main' }),
+          );
+        },
+      ),
+    );
+
+    const mockContext = createMockActionContext({
+      input: {
+        repoUrl: 'gitea.com?owner=owner&repo=repo',
+        branchName: 'main',
+        token: 'user-token',
+      },
+    });
+
+    await action.handler(mockContext);
+    expect(mockContext.output).toHaveBeenCalledWith('branchName', 'main');
+  });
+
   it('should skip branch protection when protectDefaultBranch is false', async () => {
     const mockContext = createMockActionContext({
       input: {
