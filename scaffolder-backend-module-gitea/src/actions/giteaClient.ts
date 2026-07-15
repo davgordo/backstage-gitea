@@ -29,6 +29,14 @@ export type GiteaRepo = {
   repoUrl: string;
 };
 
+export type GiteaPermission = 'read' | 'write' | 'admin';
+
+export type GiteaTeam = {
+  id: number;
+  name: string;
+  slug?: string;
+};
+
 export type ResolveGiteaRepoOptions = {
   repoUrl: string;
   integrations: ScmIntegrationRegistry;
@@ -121,6 +129,45 @@ export class GiteaClient {
     const encodedOwner = encodeURIComponent(this.repo.owner);
     const encodedRepo = encodeURIComponent(this.repo.repo);
     return `/repos/${encodedOwner}/${encodedRepo}${path}`;
+  }
+
+  async addRepositoryCollaborator(
+    username: string,
+    permission: GiteaPermission,
+  ): Promise<void> {
+    await this.request(
+      this.repoPath(`/collaborators/${encodeURIComponent(username)}`),
+      {
+        method: 'PUT',
+        body: JSON.stringify({ permission }),
+      },
+    );
+  }
+
+  async listOrganizationTeams(organization: string): Promise<GiteaTeam[]> {
+    return this.request<GiteaTeam[]>(
+      `/orgs/${encodeURIComponent(organization)}/teams?limit=1000`,
+    );
+  }
+
+  async attachRepositoryToTeam(
+    organization: string,
+    teamId: number,
+  ): Promise<void> {
+    await this.request(
+      `/teams/${teamId}/repos/${encodeURIComponent(organization)}/${encodeURIComponent(this.repo.repo)}`,
+      { method: 'PUT' },
+    );
+  }
+
+  async updateTeamPermission(
+    teamId: number,
+    permission: GiteaPermission,
+  ): Promise<void> {
+    await this.request(`/teams/${teamId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ permission }),
+    });
   }
 }
 

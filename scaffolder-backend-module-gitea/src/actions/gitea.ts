@@ -30,8 +30,103 @@ import {
 } from '@backstage/plugin-scaffolder-node';
 import { examples } from './gitea.examples';
 import { applyBranchProtection, BranchProtectionOptions } from './giteaBranchProtection';
-import { GiteaClient, resolveGiteaRepo } from './giteaClient';
+import { GiteaClient, GiteaPermission, GiteaTeam, resolveGiteaRepo } from './giteaClient';
 import crypto from 'node:crypto';
+
+type GiteaCollaborator =
+  | {
+      user: string;
+      access: string;
+    }
+  | {
+      team: string;
+      access: string;
+    };
+
+type GiteaOrganization = {
+  id: number;
+  name?: string;
+  username?: string;
+};
+
+const permissionMap: Record<string, GiteaPermission> = {
+  pull: 'read',
+  triage: 'read',
+  read: 'read',
+  push: 'write',
+  maintain: 'write',
+  write: 'write',
+  admin: 'admin',
+};
+
+function normalizeGiteaPermission(permission: string): GiteaPermission {
+  const normalized = permissionMap[permission.toLowerCase()];
+  if (!normalized) {
+    throw new InputError(
+      `Unsupported repository access permission '${permission}'. Expected one of: pull, push, triage, maintain, admin, read, write`,
+    );
+  }
+  return normalized;
+}
+
+function isTeamAccess(access?: string): boolean {
+  return Boolean(access?.includes('/'));
+}
+
+function hasTeamProvisioning(
+  access: string | undefined,
+  collaborators: GiteaCollaborator[] | undefined,
+): boolean {
+  return isTeamAccess(access) || Boolean(collaborators?.some(c => 'team' in c));
+}
+
+function findGiteaTeam(teams: GiteaTeam[], teamNameOrSlug: string): GiteaTeam | undefined {
+  const normalized = teamNameOrSlug.toLowerCase();
+  return teams.find(team => {
+    return (
+      team.name.toLowerCase() === normalized ||
+      team.slug?.toLowerCase() === normalized
+    );
+  });
+}
+
+async function getGiteaOrganization(
+  config: GiteaIntegrationConfig,
+  options: {
+    owner: string;
+    token?: string;
+  },
+): Promise<GiteaOrganization | undefined> {
+  const { owner, token } = options;
+  let response: Response;
+  const getOptions: RequestInit = {
+    method: 'GET',
+    headers: buildAuthHeaders(config, token),
+  };
+
+  try {
+    response = await fetch(
+      `${config.baseUrl}/api/v1/orgs/${owner}`,
+      getOptions,
+    );
+  } catch (e) {
+    throw new Error(
+      `Unable to get the Organization: ${owner}; Error cause: ${e.message}, code: ${e.cause.code}`,
+    );
+  }
+
+  if (response.status === 404) {
+    return undefined;
+  }
+
+  if (response.status !== 200) {
+    throw new Error(
+      `Organization ${owner} do not exist. Please create it first !`,
+    );
+  }
+
+  return (await response.json()) as GiteaOrganization;
+}
 
 const checkGiteaContentUrl = async (
   config: GiteaIntegrationConfig,
@@ -80,26 +175,10 @@ const checkGiteaOrg = async (
     token?: string;
   },
 ): Promise<void> => {
-  const { owner, token } = options;
-  let response: Response;
-  // check first if the org = owner exists
-  const getOptions: RequestInit = {
-    method: 'GET',
-    headers: buildAuthHeaders(config, token),
-  };
-  try {
-    response = await fetch(
-      `${config.baseUrl}/api/v1/orgs/${owner}`,
-      getOptions,
-    );
-  } catch (e) {
+  const organization = await getGiteaOrganization(config, options);
+  if (!organization) {
     throw new Error(
-      `Unable to get the Organization: ${owner}; Error cause: ${e.message}, code: ${e.cause.code}`,
-    );
-  }
-  if (response.status !== 200) {
-    throw new Error(
-      `Organization ${owner} do not exist. Please create it first !`,
+      `Organization ${options.owner} do not exist. Please create it first !`,
     );
   }
 };
@@ -210,6 +289,119 @@ async function checkAvailabilityGiteaRepository(
   }
 }
 
+async function addTeamAccess(options: {
+  client: GiteaClient;
+  owner: string;
+  repo: string;
+  team: string;
+  requestedAccess: string;
+  permission: GiteaPermission;
+  operation: string;
+}): Promise<void> {
+  const { client, owner, repo, team, requestedAccess, permission, operation } = options;
+  let teams: GiteaTeam[];
+  try {
+    teams = await client.listOrganizationTeams(owner);
+  } catch (e) {
+    throw new Error(
+      `Failed to apply ${operation} for repository ${owner}/${repo}: could not list organization teams while resolving team '${team}' with requested permission '${requestedAccess}' (${permission}), ${e.message}`,
+    );
+  }
+  const giteaTeam = findGiteaTeam(teams, team);
+
+  if (!giteaTeam) {
+    throw new InputError(
+      `Failed to apply ${operation} for repository ${owner}/${repo}: team '${team}' with requested permission '${requestedAccess}' does not exist in organization '${owner}'`,
+    );
+  }
+
+  try {
+    await client.updateTeamPermission(giteaTeam.id, permission);
+  } catch (e) {
+    throw new Error(
+      `Failed to apply ${operation} for repository ${owner}/${repo}: could not update team '${team}' to requested permission '${requestedAccess}' (${permission}), ${e.message}`,
+    );
+  }
+
+  try {
+    await client.attachRepositoryToTeam(owner, giteaTeam.id);
+  } catch (e) {
+    throw new Error(
+      `Failed to apply ${operation} for repository ${owner}/${repo}: could not attach team '${team}' with requested permission '${requestedAccess}' (${permission}), ${e.message}`,
+    );
+  }
+}
+
+async function provisionRepositoryAccess(options: {
+  client: GiteaClient;
+  owner: string;
+  repo: string;
+  ownerIsOrganization: boolean;
+  access?: string;
+  collaborators?: GiteaCollaborator[];
+}): Promise<void> {
+  const { client, owner, repo, ownerIsOrganization, access, collaborators } = options;
+
+  if (isTeamAccess(access)) {
+    const [organization, team] = access!.split('/', 2);
+    if (organization.toLowerCase() !== owner.toLowerCase()) {
+      throw new InputError(
+        `Failed to apply access for repository ${owner}/${repo}: team '${access}' must belong to repository owner organization '${owner}'`,
+      );
+    }
+    if (!ownerIsOrganization) {
+      throw new InputError(
+        `Failed to apply access for repository ${owner}/${repo}: team '${access}' requires repository owner '${owner}' to be an organization`,
+      );
+    }
+    await addTeamAccess({
+      client,
+      owner,
+      repo,
+      team,
+      requestedAccess: 'admin',
+      permission: 'admin',
+      operation: 'access',
+    });
+  } else if (access && access.toLowerCase() !== owner.toLowerCase()) {
+    try {
+      await client.addRepositoryCollaborator(access, 'admin');
+    } catch (e) {
+      throw new Error(
+        `Failed to apply access for repository ${owner}/${repo}: could not add user '${access}' with requested permission 'admin', ${e.message}`,
+      );
+    }
+  }
+
+  for (const collaborator of collaborators ?? []) {
+    const permission = normalizeGiteaPermission(collaborator.access);
+    if ('user' in collaborator) {
+      try {
+        await client.addRepositoryCollaborator(collaborator.user, permission);
+      } catch (e) {
+        throw new Error(
+          `Failed to apply collaborator for repository ${owner}/${repo}: could not add user '${collaborator.user}' with requested permission '${collaborator.access}' (${permission}), ${e.message}`,
+        );
+      }
+    } else {
+      if (!ownerIsOrganization) {
+        throw new InputError(
+          `Failed to apply collaborator for repository ${owner}/${repo}: team '${collaborator.team}' with requested permission '${collaborator.access}' requires repository owner '${owner}' to be an organization`,
+        );
+      }
+      await addTeamAccess({
+        client,
+        owner,
+        repo,
+        team: collaborator.team,
+        requestedAccess: collaborator.access,
+        permission,
+        operation: 'collaborator',
+      });
+    }
+  }
+}
+
 /**
  * Creates a new action that initializes a git repository using the content of the workspace.
  * and publishes it to a Gitea instance.
@@ -283,6 +475,38 @@ export function createPublishGiteaAction(options: {
             .string({
               description: 'A Gitea authentication token to use for API and git operations. When provided, it overrides the integration credentials.',
             })
+            .optional(),
+        access: z =>
+          z
+            .string({
+              description: 'Sets an admin collaborator on the repository. Can either be a user reference different from `owner` in `repoUrl` or team reference, eg. `org/team-name`',
+            })
+            .optional(),
+        collaborators: z =>
+          z
+            .array(
+              z.union([
+                z.object({
+                  user: z.string({
+                    description: 'The name of the user that will be added as a collaborator',
+                  }),
+                  access: z.string({
+                    description: 'The type of access for the user',
+                  }),
+                }),
+                z.object({
+                  team: z.string({
+                    description: 'The name of the team that will be added as a collaborator',
+                  }),
+                  access: z.string({
+                    description: 'The type of access for the team',
+                  }),
+                }),
+              ]),
+              {
+                description: 'Provide additional users or teams with permissions',
+              },
+            )
             .optional(),
 
         // Branch protection inputs (GitHub parity)
@@ -401,6 +625,8 @@ export function createPublishGiteaAction(options: {
         sourcePath,
         signCommit,
         token,
+        access,
+        collaborators,
         protectDefaultBranch = true,
         protectEnforceAdmins = true,
         requireCodeOwnerReviews = false,
@@ -439,8 +665,20 @@ export function createPublishGiteaAction(options: {
         );
       }
 
-      // check if the org exists within the gitea server
-      if (owner) {
+      if (!owner) {
+        throw new InputError('repoUrl must include owner');
+      }
+
+      const ownerOrganization = await getGiteaOrganization(
+        integrationConfig.config,
+        { owner, token },
+      );
+      if (!ownerOrganization && hasTeamProvisioning(access, collaborators)) {
+        throw new InputError(
+          `Cannot assign team access for repository ${owner}/${repo}: repository owner '${owner}' is not an organization`,
+        );
+      }
+      if (!ownerOrganization) {
         await checkGiteaOrg(integrationConfig.config, { owner, token });
       }
 
@@ -451,6 +689,19 @@ export function createPublishGiteaAction(options: {
         projectName: repo,
         token,
       });
+
+      if (access || collaborators?.length) {
+        const repoData = resolveGiteaRepo({ repoUrl, integrations });
+        const client = new GiteaClient({ repo: repoData, token: token || password });
+        await provisionRepositoryAccess({
+          client,
+          owner,
+          repo,
+          ownerIsOrganization: Boolean(ownerOrganization),
+          access,
+          collaborators,
+        });
+      }
 
       const auth = {
         username: (token ? '' : username)!,

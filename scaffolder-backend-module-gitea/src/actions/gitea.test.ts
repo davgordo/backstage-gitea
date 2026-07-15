@@ -68,6 +68,46 @@ describe('publish:gitea', () => {
     jest.resetAllMocks();
   });
 
+  const mockSuccessfulPublish = (owner = 'org1') => {
+    server.use(
+      rest.get(`https://gitea.com/api/v1/orgs/${owner}`, (_req, res, ctx) => {
+        return res(
+          ctx.status(200),
+          ctx.set('Content-Type', 'application/json'),
+          ctx.json({
+            id: 1,
+            name: owner,
+            visibility: 'public',
+            repo_admin_change_team_access: false,
+            username: owner,
+          }),
+        );
+      }),
+      rest.get(
+        `https://gitea.com/${owner}/repo/src/branch/main`,
+        (_req, res, ctx) => {
+          return res(
+            ctx.status(200),
+            ctx.set('Content-Type', 'application/json'),
+            ctx.json({}),
+          );
+        },
+      ),
+      rest.post(`https://gitea.com/api/v1/orgs/${owner}/repos`, (req, res, ctx) => {
+        expect(req.body).toEqual({
+          name: 'repo',
+          private: false,
+          description,
+        });
+        return res(
+          ctx.status(201),
+          ctx.set('Content-Type', 'application/json'),
+          ctx.json({}),
+        );
+      }),
+    );
+  };
+
   it('should throw an error when the repoUrl is not well formed', async () => {
     await expect(
       action.handler({
@@ -311,6 +351,233 @@ describe('publish:gitea', () => {
       remoteUrl: 'https://gitea.com/org1/repo.git',
       defaultBranch: 'main',
       auth: { username: '', password: userToken },
+      logger: mockContext.logger,
+      commitMessage: expect.stringContaining('initial commit\n\nChange-Id:'),
+      gitAuthorInfo: {
+        email: undefined,
+        name: undefined,
+      },
+    });
+  });
+
+  it('should apply access with an organization team as admin', async () => {
+    mockSuccessfulPublish();
+    const calls: string[] = [];
+
+    server.use(
+      rest.get('https://gitea.com/api/v1/orgs/org1/teams', (_req, res, ctx) =>
+        res(ctx.status(200), ctx.json([{ id: 7, name: 'Platform Admins', slug: 'platform-admins' }])),
+      ),
+      rest.patch('https://gitea.com/api/v1/teams/7', (req, res, ctx) => {
+        calls.push('patch-team');
+        expect(req.body).toEqual({ permission: 'admin' });
+        return res(ctx.status(200), ctx.json({}));
+      }),
+      rest.put('https://gitea.com/api/v1/teams/7/repos/org1/repo', (_req, res, ctx) => {
+        calls.push('attach-team');
+        return res(ctx.status(204));
+      }),
+    );
+
+    await action.handler({
+      ...mockContext,
+      input: {
+        ...mockContext.input,
+        repoUrl: 'gitea.com?repo=repo&owner=org1',
+        access: 'org1/platform-admins',
+        protectDefaultBranch: false,
+      },
+    });
+
+    expect(calls).toEqual(['patch-team', 'attach-team']);
+  });
+
+  it('should apply access with a user as admin', async () => {
+    mockSuccessfulPublish();
+
+    server.use(
+      rest.put(
+        'https://gitea.com/api/v1/repos/org1/repo/collaborators/noah',
+        (req, res, ctx) => {
+          expect(req.body).toEqual({ permission: 'admin' });
+          return res(ctx.status(204));
+        },
+      ),
+    );
+
+    await action.handler({
+      ...mockContext,
+      input: {
+        ...mockContext.input,
+        repoUrl: 'gitea.com?repo=repo&owner=org1',
+        access: 'noah',
+        protectDefaultBranch: false,
+      },
+    });
+  });
+
+  it('should apply a team collaborator with push as write', async () => {
+    mockSuccessfulPublish();
+
+    server.use(
+      rest.get('https://gitea.com/api/v1/orgs/org1/teams', (_req, res, ctx) =>
+        res(ctx.status(200), ctx.json([{ id: 8, name: 'Developers', slug: 'developers' }])),
+      ),
+      rest.patch('https://gitea.com/api/v1/teams/8', (req, res, ctx) => {
+        expect(req.body).toEqual({ permission: 'write' });
+        return res(ctx.status(200), ctx.json({}));
+      }),
+      rest.put('https://gitea.com/api/v1/teams/8/repos/org1/repo', (_req, res, ctx) =>
+        res(ctx.status(204)),
+      ),
+    );
+
+    await action.handler({
+      ...mockContext,
+      input: {
+        ...mockContext.input,
+        repoUrl: 'gitea.com?repo=repo&owner=org1',
+        collaborators: [{ team: 'developers', access: 'push' }],
+        protectDefaultBranch: false,
+      },
+    });
+  });
+
+  it('should apply a user collaborator with admin', async () => {
+    mockSuccessfulPublish();
+
+    server.use(
+      rest.put(
+        'https://gitea.com/api/v1/repos/org1/repo/collaborators/noah',
+        (req, res, ctx) => {
+          expect(req.body).toEqual({ permission: 'admin' });
+          return res(ctx.status(204));
+        },
+      ),
+    );
+
+    await action.handler({
+      ...mockContext,
+      input: {
+        ...mockContext.input,
+        repoUrl: 'gitea.com?repo=repo&owner=org1',
+        collaborators: [{ user: 'noah', access: 'admin' }],
+        protectDefaultBranch: false,
+      },
+    });
+  });
+
+  it.each([
+    ['pull', 'read'],
+    ['triage', 'read'],
+    ['read', 'read'],
+    ['push', 'write'],
+    ['maintain', 'write'],
+    ['write', 'write'],
+    ['admin', 'admin'],
+  ])('should normalize %s permission to %s', async (input, expected) => {
+    mockSuccessfulPublish();
+
+    server.use(
+      rest.put(
+        'https://gitea.com/api/v1/repos/org1/repo/collaborators/noah',
+        (req, res, ctx) => {
+          expect(req.body).toEqual({ permission: expected });
+          return res(ctx.status(204));
+        },
+      ),
+    );
+
+    await action.handler({
+      ...mockContext,
+      input: {
+        ...mockContext.input,
+        repoUrl: 'gitea.com?repo=repo&owner=org1',
+        collaborators: [{ user: 'noah', access: input }],
+        protectDefaultBranch: false,
+      },
+    });
+  });
+
+  it('should fail clearly when a requested team does not exist', async () => {
+    mockSuccessfulPublish();
+
+    server.use(
+      rest.get('https://gitea.com/api/v1/orgs/org1/teams', (_req, res, ctx) =>
+        res(ctx.status(200), ctx.json([])),
+      ),
+    );
+
+    await expect(
+      action.handler({
+        ...mockContext,
+        input: {
+          ...mockContext.input,
+          repoUrl: 'gitea.com?repo=repo&owner=org1',
+          collaborators: [{ team: 'missing-team', access: 'push' }],
+          protectDefaultBranch: false,
+        },
+      }),
+    ).rejects.toThrow(
+      "repository org1/repo: team 'missing-team' with requested permission 'push' does not exist",
+    );
+  });
+
+  it('should reject invalid collaborator permissions', async () => {
+    mockSuccessfulPublish();
+
+    await expect(
+      action.handler({
+        ...mockContext,
+        input: {
+          ...mockContext.input,
+          repoUrl: 'gitea.com?repo=repo&owner=org1',
+          collaborators: [{ user: 'noah', access: 'owner' }],
+          protectDefaultBranch: false,
+        },
+      }),
+    ).rejects.toThrow("Unsupported repository access permission 'owner'");
+  });
+
+  it('should reject team assignment against a non-organization owner', async () => {
+    server.use(
+      rest.get('https://gitea.com/api/v1/orgs/noah', (_req, res, ctx) =>
+        res(ctx.status(404), ctx.json({ message: 'Not Found' })),
+      ),
+    );
+
+    await expect(
+      action.handler({
+        ...mockContext,
+        input: {
+          ...mockContext.input,
+          repoUrl: 'gitea.com?repo=repo&owner=noah',
+          collaborators: [{ team: 'developers', access: 'push' }],
+          protectDefaultBranch: false,
+        },
+      }),
+    ).rejects.toThrow(
+      "Cannot assign team access for repository noah/repo: repository owner 'noah' is not an organization",
+    );
+  });
+
+  it('should preserve publish behavior when access inputs are omitted', async () => {
+    mockSuccessfulPublish();
+
+    await action.handler({
+      ...mockContext,
+      input: {
+        ...mockContext.input,
+        repoUrl: 'gitea.com?repo=repo&owner=org1',
+        protectDefaultBranch: false,
+      },
+    });
+
+    expect(initRepoAndPush).toHaveBeenCalledWith({
+      dir: mockContext.workspacePath,
+      remoteUrl: 'https://gitea.com/org1/repo.git',
+      defaultBranch: 'main',
+      auth: { username: 'gitea_user', password: 'gitea_password' },
       logger: mockContext.logger,
       commitMessage: expect.stringContaining('initial commit\n\nChange-Id:'),
       gitAuthorInfo: {

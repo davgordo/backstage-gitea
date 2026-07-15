@@ -48,8 +48,9 @@ examples/
 | **Core repo creation** | `repoUrl`, `description`, `defaultBranch`, `repoVisibility`, `gitCommitMessage`, `gitAuthorName`, `gitAuthorEmail`, `sourcePath` | ✅ Complete |
 | **P0 — `token` input** | `token` | ✅ Complete |
 | **P1 — Branch protection** | `protectDefaultBranch`, `protectEnforceAdmins`, `requireCodeOwnerReviews`, `dismissStaleReviews`, `requiredApprovingReviewCount`, `requiredStatusCheckContexts`, `requireBranchesToBeUpToDate`, `requiredCommitSigning` | ✅ Complete |
+| **P1 — Repository access** | `access`, `collaborators` | ✅ Complete. Supports user collaborators and organization teams; maps GitHub-style `pull`/`triage`/`read` to Gitea `read`, `push`/`maintain`/`write` to `write`, and `admin` to `admin` |
 | **P2 — Repo features** | `homepage`, `hasIssues`, `hasWiki`, `hasProjects`, `topics`, `deleteBranchOnMerge`, `allowMergeCommit`, `allowSquashMerge`, `allowRebaseMerge`, `squashMergeCommitTitle`, `squashMergeCommitMessage`, `allowAutoMerge`, `allowUpdateBranch` | ❌ Not done |
-| **GitHub-only** | `access`, `collaborators`, `bypassPullRequestAllowances`, `restrictions`, `requiredConversationResolution`, `requireLastPushApproval`, `repoVariables`, `secrets`, `oidcCustomization`, `customProperties`, `subscribe`, `requiredLinearHistory` | ℹ️ No Gitea equivalent |
+| **GitHub-only** | `bypassPullRequestAllowances`, `restrictions`, `requiredConversationResolution`, `requireLastPushApproval`, `repoVariables`, `secrets`, `oidcCustomization`, `customProperties`, `subscribe`, `requiredLinearHistory` | ℹ️ No Gitea equivalent |
 
 **No breaking changes** — all new inputs are `.optional()`, so existing `publish:gitea` templates continue to work without modification.
 

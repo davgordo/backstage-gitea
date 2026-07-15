@@ -156,6 +156,8 @@ Creates a new Gitea repository and pushes the workspace contents to it.
 | `sourcePath` | string | No | — | Path within the workspace that will be used as the repository root. If omitted, the entire workspace will be published |
 | `signCommit` | boolean | No | `false` | Sign commit with configured PGP private key |
 | `token` | string | No | — | A Gitea authentication token to use for API and git operations. When provided, it overrides the integration credentials |
+| `access` | string | No | — | Grants admin repository access to a user, or to an organization team when provided as `owner/team-name` |
+| `collaborators` | array | No | — | Grants repository access to additional `{ user, access }` or `{ team, access }` entries |
 | `protectDefaultBranch` | boolean | No | `true` | Enables branch protection on the default branch |
 | `protectEnforceAdmins` | boolean | No | `true` | Enforce branch protection for administrators |
 | `requireCodeOwnerReviews` | boolean | No | `false` | Require review from code owners |
@@ -167,6 +169,28 @@ Creates a new Gitea repository and pushes the workspace contents to it.
 
 The following parameters are accepted for GitHub API parity but are **not supported** by Gitea and will be logged as warnings:
 `bypassPullRequestAllowances`, `restrictions`, `requiredConversationResolution`, `requireLastPushApproval`, `requiredLinearHistory`.
+
+Repository access inputs use the same public shape as `publish:github`:
+
+```yaml
+access: my-org/software-team
+
+collaborators:
+  - team: software-team
+    access: push
+  - user: noah
+    access: admin
+```
+
+`access: owner/team-name` attaches that organization team to the new repository with admin access. `access: username` adds the user as an admin repository collaborator, unless the username is the repository owner. Team access is supported only when the repository owner is an organization. Team names are resolved from the Gitea organization teams API by name or slug.
+
+Permission values are normalized before calling Gitea:
+
+| Input | Gitea permission |
+|---|---|
+| `pull`, `triage`, `read` | `read` |
+| `push`, `maintain`, `write` | `write` |
+| `admin` | `admin` |
 
 **Outputs**
 
@@ -187,6 +211,21 @@ The following parameters are accepted for GitHub API parity but are **not suppor
     description: My new repository
     defaultBranch: main
     repoVisibility: private
+```
+
+```yaml
+- id: publish
+  action: publish:gitea
+  input:
+    repoUrl: gitea.example.com?owner=software-team&repo=my-service
+    description: My service
+    repoVisibility: private
+    access: software-team/platform-admins
+    collaborators:
+      - team: developers
+        access: push
+      - user: noah
+        access: admin
 ```
 
 ### `gitea:webhook`
