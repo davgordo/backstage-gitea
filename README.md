@@ -1,6 +1,6 @@
 # Backstage Gitea Scaffolder Parity Workspace
 
-This workspace is for closing the practical parity gap between Backstage's GitHub scaffolder module and the existing Gitea scaffolder module as well as packaging both the enhanced scaffolder and the existing Gitea catalog plugin as dynamic plugins.
+This workspace closes the practical parity gap between Backstage's GitHub and Gitea modules. It packages the enhanced scaffolder, the standard Gitea catalog module, and the opt-in Stage One GitHub-compatibility catalog module as separate dynamic plugins.
 
 It adds implementations for:
 
@@ -18,6 +18,12 @@ It also captures the publish-as-user gap: `publish:gitea` should eventually acce
 scaffolder-backend-module-gitea/
   src/module.ts
   src/actions/*.ts
+  README.md
+
+catalog-backend-module-gitea-github-compat/
+  src/module.ts
+  src/GiteaGithubCompatEntityProvider.ts
+  src/TemplateCompatibilityProcessor.ts
   README.md
 
 rhdh-packaging/
@@ -63,7 +69,7 @@ examples/
 
 ## Publishing to Gitea npm registry
 
-The unified pipeline script handles both plugins (catalog and scaffolder) in a single run:
+The unified pipeline stages the standard catalog, scaffolder, and compatibility catalog modules in one run. See [the compatibility module README](catalog-backend-module-gitea-github-compat/README.md) for the complete Stage One configuration and supported subset.
 
 ```bash
 cd rhdh-packaging

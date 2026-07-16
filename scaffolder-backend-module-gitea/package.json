@@ -1,6 +1,6 @@
 {
   "name": "@backstage/plugin-scaffolder-backend-module-gitea",
-  "version": "0.2.19-rhdh.1.10.1.1",
+  "version": "0.2.19-rhdh.1.10.1.2",
   "description": "The gitea module for @backstage/plugin-scaffolder-backend",
   "backstage": {
     "role": "backend-plugin-module",
@@ -59,6 +59,7 @@
     "@backstage/cli": "0.36.0",
     "@backstage/cli-defaults": "0.1.0",
     "@backstage/integration": "2.0.0",
+    "@backstage/plugin-scaffolder-backend-module-github": "0.9.7",
     "@backstage/plugin-scaffolder-node": "0.13.1",
     "@backstage/plugin-scaffolder-node-test-utils": "0.3.9",
     "@jest/environment-jsdom-abstract": "30.3.0",

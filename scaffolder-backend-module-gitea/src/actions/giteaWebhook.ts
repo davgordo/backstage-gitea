@@ -19,17 +19,23 @@ import { ScmIntegrationRegistry } from '@backstage/integration';
 import { z } from 'zod';
 import { createGiteaClient } from './giteaClient';
 
-const schema = z.object({
+export const giteaWebhookInputSchema = z.object({
   repoUrl: z.string().describe('Repository URL in Backstage repoUrl format, e.g. gitea.example.com?owner=org&repo=name'),
   webhookUrl: z.string().url().describe('Target URL that Gitea should call when the selected events occur'),
   webhookSecret: z.string().optional().describe('Secret token Gitea sends to the webhook receiver'),
   events: z.array(z.string()).default(['push']).describe('Gitea hook events, for example push, pull_request, create, delete'),
   active: z.boolean().default(true),
-  contentType: z.enum(['json', 'form']).default('json'),
+  contentType: z.enum(['json', 'form']).default('form'),
   httpMethod: z.enum(['post']).default('post'),
   insecureSsl: z.boolean().default(false).describe('When true, disables TLS verification for the hook target'),
   branchFilter: z.string().optional().describe('Optional branch filter supported by Gitea hooks'),
   token: z.string().optional().describe('Optional user or task token. When provided, it overrides configured integration credentials.'),
+});
+const schema = giteaWebhookInputSchema;
+
+export const giteaWebhookOutputSchema = z.object({
+  hookId: z.number().optional(),
+  hookUrl: z.string().optional(),
 });
 
 type Input = z.infer<typeof schema>;
@@ -54,10 +60,7 @@ export function createGiteaWebhookAction(options: Options) {
       // @ts-ignore - Zod schema types differ between scaffolder-node 0.12.x and source
       input: schema,
       // @ts-ignore - Zod schema types differ between scaffolder-node 0.12.x and source
-      output: z.object({
-        hookId: z.number().optional(),
-        hookUrl: z.string().optional(),
-      }),
+      output: giteaWebhookOutputSchema,
     },
     async handler(ctx) {
       const input = schema.parse(ctx.input);

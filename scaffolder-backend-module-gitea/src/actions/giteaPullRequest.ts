@@ -21,7 +21,7 @@ import { z } from 'zod';
 import path from 'node:path';
 import { createGiteaClient } from './giteaClient';
 
-const schema = z.object({
+export const giteaPullRequestInputSchema = z.object({
   repoUrl: z.string().describe('Target repository URL in Backstage repoUrl format'),
   branchName: z.string().describe('Source branch to create/update'),
   targetBranchName: z.string().default('main').describe('Base branch for the pull request'),
@@ -38,11 +38,20 @@ const schema = z.object({
   assignees: z.array(z.string()).default([]).describe('List of user logins to assign to the PR'),
   teamReviewers: z.array(z.string()).default([]).describe('List of team slugs to request as team reviewers on the PR'),
   update: z.boolean().default(false).describe('If true, update an existing PR instead of creating a new one'),
-  createWhenEmpty: z.boolean().default(false).describe('If true, create a PR even if no files exist in the source path'),
+  createWhenEmpty: z.boolean().default(true).describe('If true, create a PR even if no files exist in the source path'),
   // Git author fields — Gitea Contents API doesn't support custom git authors, these are accepted for API parity
   gitAuthorName: z.string().optional().describe('Reserved for API parity with GitHub (not supported by Gitea Contents API)'),
   gitAuthorEmail: z.string().optional().describe('Reserved for API parity with GitHub (not supported by Gitea Contents API)'),
   forceEmptyGitAuthor: z.boolean().default(false).describe('Reserved for API parity with GitHub (not supported by Gitea Contents API)'),
+});
+const schema = giteaPullRequestInputSchema;
+
+export const giteaPullRequestOutputSchema = z.object({
+  remoteUrl: z.string().optional(),
+  pullRequestUrl: z.string().optional(),
+  pullRequestNumber: z.number().optional(),
+  branchName: z.string().optional(),
+  targetBranchName: z.string().optional(),
 });
 
 type Input = z.infer<typeof schema>;
@@ -90,6 +99,7 @@ function resolveWorkspaceSourceDirectory(
  * opens a pull request. This intentionally mirrors `publish:github:pull-request`.
  */
 type PullRequestOutput = {
+  remoteUrl?: string;
   pullRequestUrl?: string;
   pullRequestNumber?: number;
   branchName?: string;
@@ -103,12 +113,7 @@ export function createGiteaPullRequestAction(options: Options) {
       // @ts-ignore - Zod schema types differ between scaffolder-node 0.12.x and source
       input: schema,
       // @ts-ignore - Zod schema types differ between scaffolder-node 0.12.x and source
-      output: z.object({
-        pullRequestUrl: z.string().optional(),
-        pullRequestNumber: z.number().optional(),
-        branchName: z.string().optional(),
-        targetBranchName: z.string().optional(),
-      }),
+      output: giteaPullRequestOutputSchema,
     },
     async handler(ctx) {
       const input = schema.parse(ctx.input);
@@ -287,6 +292,7 @@ export function createGiteaPullRequestAction(options: Options) {
         }
       }
 
+      ctx.output('remoteUrl', pr.html_url);
       ctx.output('pullRequestUrl', pr.html_url);
       ctx.output('pullRequestNumber', pr.number ?? pr.index ?? pr.id);
       ctx.output('branchName', input.branchName);

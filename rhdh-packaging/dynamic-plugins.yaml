@@ -1,13 +1,19 @@
 plugins:
-  - package: '@<scope>/plugin-catalog-backend-module-gitea-dynamic@<catalog_version>'
+  - package: 'https://gitea.example.com/api/packages/<scope>/npm/%40<scope>%2Fplugin-catalog-backend-module-gitea-dynamic/-/<catalog_version>/plugin-catalog-backend-module-gitea-dynamic-<catalog_version>.tgz'
     disabled: false
     integrity: 'sha256-<catalog_hash>'
     pluginConfig:
       dynamicPlugins:
         frontend: {}
-  - package: '@<scope>/plugin-scaffolder-backend-module-gitea-dynamic@<scaffolder_version>'
+  - package: 'https://gitea.example.com/api/packages/<scope>/npm/%40<scope>%2Fplugin-scaffolder-backend-module-gitea-dynamic/-/<scaffolder_version>/plugin-scaffolder-backend-module-gitea-dynamic-<scaffolder_version>.tgz'
     disabled: false
     integrity: 'sha256-<scaffolder_hash>'
+    pluginConfig:
+      dynamicPlugins:
+        frontend: {}
+  - package: 'https://gitea.example.com/api/packages/<scope>/npm/%40<scope>%2Fplugin-catalog-backend-module-gitea-github-compat-dynamic/-/<compat_version>/plugin-catalog-backend-module-gitea-github-compat-dynamic-<compat_version>.tgz'
+    disabled: false
+    integrity: 'sha256-<compat_hash>'
     pluginConfig:
       dynamicPlugins:
         frontend: {}

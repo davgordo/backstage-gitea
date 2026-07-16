@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Builds/fetches the two Gitea modules, stages them as RHDH-compatible npm
+# Builds/fetches the three Gitea modules, stages them as RHDH-compatible npm
 # packages, publishes them to Gitea, validates the published artifacts, and
 # renders deployment configuration.
 
@@ -11,6 +11,7 @@ DIST_DIR="$SCRIPT_DIR/dist-rhdh"
 DIST_CONFIG="$SCRIPT_DIR/dist-config"
 STAGE_ROOT="$SCRIPT_DIR/dynamic-plugins-root"
 LOCAL_SCAFFOLDER_DIR="$PROJECT_ROOT/scaffolder-backend-module-gitea"
+LOCAL_COMPAT_DIR="$PROJECT_ROOT/catalog-backend-module-gitea-github-compat"
 
 CATALOG_SOURCE="@backstage/plugin-catalog-backend-module-gitea"
 CATALOG_SOURCE_VERSION="0.1.10"
@@ -51,6 +52,7 @@ NPMRC_HOST="${NPMRC_HOST#https://}"
 
 CATALOG_PACKAGE="@${NPM_SCOPE}/plugin-catalog-backend-module-gitea-dynamic"
 SCAFFOLDER_PACKAGE="@${NPM_SCOPE}/plugin-scaffolder-backend-module-gitea-dynamic"
+COMPAT_PACKAGE="@${NPM_SCOPE}/plugin-catalog-backend-module-gitea-github-compat-dynamic"
 
 WORK_ROOT="$(mktemp -d)"
 AUTH_NPMRC="$WORK_ROOT/.npmrc"
@@ -231,24 +233,38 @@ pack_package "$SCAFFOLDER_STAGE" "$SCAFFOLDER_OUTPUT"
 echo "  OK: $(basename "$SCAFFOLDER_OUTPUT")"
 
 echo
-echo "C) Publishing packages"
-publish_package "$CATALOG_PACKAGE" "$CATALOG_VERSION" "$CATALOG_OUTPUT"
-publish_package "$SCAFFOLDER_PACKAGE" "$SCAFFOLDER_VERSION" "$SCAFFOLDER_OUTPUT"
+echo "C) Building and staging GitHub-compatibility catalog plugin"
+(cd "$LOCAL_COMPAT_DIR" && npm run build)
+COMPAT_VERSION="$(node -p "require('$LOCAL_COMPAT_DIR/package.json').version")"
+COMPAT_STAGE="$STAGE_ROOT/${COMPAT_PACKAGE#@*/}/$COMPAT_VERSION"
+stage_package "$LOCAL_COMPAT_DIR" "$COMPAT_PACKAGE" "$COMPAT_VERSION" "$COMPAT_STAGE"
+COMPAT_OUTPUT="$DIST_DIR/catalog-backend-module-gitea-github-compat-$COMPAT_VERSION.tgz"
+pack_package "$COMPAT_STAGE" "$COMPAT_OUTPUT"
 
 echo
-echo "D) Validating published packages"
+echo "D) Publishing packages"
+publish_package "$CATALOG_PACKAGE" "$CATALOG_VERSION" "$CATALOG_OUTPUT"
+publish_package "$SCAFFOLDER_PACKAGE" "$SCAFFOLDER_VERSION" "$SCAFFOLDER_OUTPUT"
+publish_package "$COMPAT_PACKAGE" "$COMPAT_VERSION" "$COMPAT_OUTPUT"
+
+echo
+echo "E) Validating published packages"
 CATALOG_HASH_FILE="$DIST_DIR/plugin-catalog-backend-module-gitea-dynamic-hash.b64"
 SCAFFOLDER_HASH_FILE="$DIST_DIR/plugin-scaffolder-backend-module-gitea-dynamic-hash.b64"
+COMPAT_HASH_FILE="$DIST_DIR/plugin-catalog-backend-module-gitea-github-compat-dynamic-hash.b64"
 validate_package "$CATALOG_PACKAGE" "$CATALOG_VERSION" "$CATALOG_HASH_FILE"
 validate_package "$SCAFFOLDER_PACKAGE" "$SCAFFOLDER_VERSION" "$SCAFFOLDER_HASH_FILE"
+validate_package "$COMPAT_PACKAGE" "$COMPAT_VERSION" "$COMPAT_HASH_FILE"
 
 CATALOG_HASH="$(cat "$CATALOG_HASH_FILE")"
 SCAFFOLDER_HASH="$(cat "$SCAFFOLDER_HASH_FILE")"
+COMPAT_HASH="$(cat "$COMPAT_HASH_FILE")"
 CATALOG_URL="$(registry_tarball_url "$CATALOG_PACKAGE" "$CATALOG_VERSION")"
 SCAFFOLDER_URL="$(registry_tarball_url "$SCAFFOLDER_PACKAGE" "$SCAFFOLDER_VERSION")"
+COMPAT_URL="$(registry_tarball_url "$COMPAT_PACKAGE" "$COMPAT_VERSION")"
 
 echo
-echo "E) Rendering deployment configuration"
+echo "F) Rendering deployment configuration"
 cp "$SCRIPT_DIR/values-rhdh.yaml" "$DIST_CONFIG/values-rhdh.yaml"
 cp "$SCRIPT_DIR/dynamic-plugins.yaml" "$DIST_CONFIG/dynamic-plugins.yaml"
 write_npmrc "$DIST_CONFIG/npmrc"
@@ -260,25 +276,38 @@ CATALOG_URL="$CATALOG_URL" \
 SCAFFOLDER_VERSION="$SCAFFOLDER_VERSION" \
 SCAFFOLDER_HASH="$SCAFFOLDER_HASH" \
 SCAFFOLDER_URL="$SCAFFOLDER_URL" \
+COMPAT_VERSION="$COMPAT_VERSION" \
+COMPAT_HASH="$COMPAT_HASH" \
+COMPAT_URL="$COMPAT_URL" \
 yq -i '
   .dynamicPlugins.install[0].package = "@" + strenv(NPM_SCOPE) + "/plugin-catalog-backend-module-gitea-dynamic@" + strenv(CATALOG_VERSION) |
   .dynamicPlugins.install[0].integrity = "sha256-" + strenv(CATALOG_HASH) |
   .dynamicPlugins.install[1].package = "@" + strenv(NPM_SCOPE) + "/plugin-scaffolder-backend-module-gitea-dynamic@" + strenv(SCAFFOLDER_VERSION) |
   .dynamicPlugins.install[1].integrity = "sha256-" + strenv(SCAFFOLDER_HASH) |
+  .dynamicPlugins.install[2].package = "@" + strenv(NPM_SCOPE) + "/plugin-catalog-backend-module-gitea-github-compat-dynamic@" + strenv(COMPAT_VERSION) |
+  .dynamicPlugins.install[2].integrity = "sha256-" + strenv(COMPAT_HASH) |
   .dynamicPlugins.hosts[0].packages[0] = strenv(CATALOG_URL) |
-  .dynamicPlugins.hosts[0].packages[1] = strenv(SCAFFOLDER_URL)
+  .dynamicPlugins.hosts[0].packages[1] = strenv(SCAFFOLDER_URL) |
+  .dynamicPlugins.hosts[0].packages[2] = strenv(COMPAT_URL)
 ' "$DIST_CONFIG/values-rhdh.yaml"
 
 NPM_SCOPE="$NPM_SCOPE" \
 CATALOG_VERSION="$CATALOG_VERSION" \
 CATALOG_HASH="$CATALOG_HASH" \
+CATALOG_URL="$CATALOG_URL" \
 SCAFFOLDER_VERSION="$SCAFFOLDER_VERSION" \
 SCAFFOLDER_HASH="$SCAFFOLDER_HASH" \
+SCAFFOLDER_URL="$SCAFFOLDER_URL" \
+COMPAT_VERSION="$COMPAT_VERSION" \
+COMPAT_HASH="$COMPAT_HASH" \
+COMPAT_URL="$COMPAT_URL" \
 yq -i '
-  .plugins[0].package = "@" + strenv(NPM_SCOPE) + "/plugin-catalog-backend-module-gitea-dynamic@" + strenv(CATALOG_VERSION) |
+  .plugins[0].package = strenv(CATALOG_URL) |
   .plugins[0].integrity = "sha256-" + strenv(CATALOG_HASH) |
-  .plugins[1].package = "@" + strenv(NPM_SCOPE) + "/plugin-scaffolder-backend-module-gitea-dynamic@" + strenv(SCAFFOLDER_VERSION) |
-  .plugins[1].integrity = "sha256-" + strenv(SCAFFOLDER_HASH)
+  .plugins[1].package = strenv(SCAFFOLDER_URL) |
+  .plugins[1].integrity = "sha256-" + strenv(SCAFFOLDER_HASH) |
+  .plugins[2].package = strenv(COMPAT_URL) |
+  .plugins[2].integrity = "sha256-" + strenv(COMPAT_HASH)
 ' "$DIST_CONFIG/dynamic-plugins.yaml"
 
 echo
@@ -287,5 +316,6 @@ echo "  Done: packages published, validated, and rendered"
 echo "================================================"
 echo "  Catalog:    $CATALOG_PACKAGE@$CATALOG_VERSION"
 echo "  Scaffolder: $SCAFFOLDER_PACKAGE@$SCAFFOLDER_VERSION"
+echo "  Compat:     $COMPAT_PACKAGE@$COMPAT_VERSION"
 echo "  Configs:    $DIST_CONFIG"
 echo

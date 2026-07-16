@@ -113,6 +113,17 @@ describe('publish:gitea:pull-request', () => {
       'pullRequestUrl',
       'https://gitea.com/owner/repo/pulls/1',
     );
+    expect(mockContext.output).toHaveBeenCalledWith(
+      'remoteUrl',
+      'https://gitea.com/owner/repo/pulls/1',
+    );
+    const urlOutputs = mockContext.output.mock.calls.filter(
+      ([name]) => name === 'remoteUrl' || name === 'pullRequestUrl',
+    );
+    expect(urlOutputs).toEqual([
+      ['remoteUrl', 'https://gitea.com/owner/repo/pulls/1'],
+      ['pullRequestUrl', 'https://gitea.com/owner/repo/pulls/1'],
+    ]);
     expect(mockContext.output).toHaveBeenCalledWith('branchName', 'feature/test');
     expect(mockContext.output).toHaveBeenCalledWith('targetBranchName', 'main');
   });
@@ -460,6 +471,7 @@ describe('publish:gitea:pull-request', () => {
         repoUrl: 'gitea.com?owner=owner&repo=repo',
         branchName: 'feature/empty',
         title: 'Empty PR',
+        createWhenEmpty: false,
       },
     });
 
