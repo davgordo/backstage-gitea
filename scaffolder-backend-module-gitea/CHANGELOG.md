@@ -1,5 +1,11 @@
 # @backstage/plugin-scaffolder-backend-module-gitea
 
+## 0.2.19-rhdh.1.10.1.3
+
+- Preserve the source branch when updating existing pull-request files.
+- Use top-level Gitea Contents API SHAs.
+- Implement SHA-backed `filesToDelete` requests with correct branch creation and error handling.
+
 ## 0.2.19-rhdh.1.10.1.1
 
 ### Patch Changes

@@ -13,9 +13,10 @@ function mapRepoUrl(value: unknown, hosts: Readonly<Record<string, string>>): un
   const question = value.indexOf('?');
   if (question < 1) return value;
   const host = value.slice(0, question);
-  const query = new URLSearchParams(value.slice(question + 1));
+  const queryString = value.slice(question + 1);
+  const query = new URLSearchParams(queryString);
   if (!hosts[host] || !query.has('owner') || !query.has('repo')) return value;
-  return `${hosts[host]}?${query.toString()}`;
+  return `${hosts[host]}?${queryString}`;
 }
 
 function visit(value: unknown, hosts: Readonly<Record<string, string>>): void {

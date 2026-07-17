@@ -1,6 +1,6 @@
 # Backstage Gitea Scaffolder Parity Workspace
 
-This workspace closes the practical parity gap between Backstage's GitHub and Gitea modules. It packages the enhanced scaffolder, the standard Gitea catalog module, and the opt-in Stage One GitHub-compatibility catalog module as separate dynamic plugins.
+This workspace closes the practical parity gap between Backstage's GitHub and Gitea modules. It packages the enhanced scaffolder, the standard Gitea catalog module, and the opt-in GitHub-authored Template compatibility module as separate dynamic plugins.
 
 It adds implementations for:
 
@@ -22,7 +22,6 @@ scaffolder-backend-module-gitea/
 
 catalog-backend-module-gitea-github-compat/
   src/module.ts
-  src/GiteaGithubCompatEntityProvider.ts
   src/TemplateCompatibilityProcessor.ts
   README.md
 
@@ -69,7 +68,7 @@ examples/
 
 ## Publishing to Gitea npm registry
 
-The unified pipeline stages the standard catalog, scaffolder, and compatibility catalog modules in one run. See [the compatibility module README](catalog-backend-module-gitea-github-compat/README.md) for the complete Stage One configuration and supported subset.
+The unified pipeline stages the standard catalog, scaffolder, and Template compatibility modules in one run. See [the compatibility module README](catalog-backend-module-gitea-github-compat/README.md) for its focused configuration and supported transformations.
 
 ```bash
 cd rhdh-packaging
@@ -77,11 +76,12 @@ cd rhdh-packaging
 ./scripts/publish-both-plugins.sh
 ```
 
-This performs 5 steps:
+This performs 6 steps:
 1. **Stage catalog** — fetches the catalog plugin from npmjs and stages an RHDH-compatible npm package
 2. **Stage scaffolder** — builds from local source (`../scaffolder-backend-module-gitea`) and stages the same package format
-3. **Publish** — pushes both tarballs as `@${GITEA_NPM_SCOPE}/*-dynamic` to the Gitea npm registry
-4. **Validate** — fetches both packages back to verify integrity and structure
-5. **Generate config** — writes versions, SHA-256 hashes, registry URLs, and deployment npm credentials into `dist-config/` (the original templates remain unmodified)
+3. **Stage compatibility** — builds the Template processor catalog module from local source
+4. **Publish** — pushes all three tarballs as `@${GITEA_NPM_SCOPE}/*-dynamic` to the Gitea npm registry
+5. **Validate** — fetches all three packages back to verify integrity and structure
+6. **Generate config** — writes versions, SHA-256 hashes, registry URLs, and deployment npm credentials into `dist-config/` (the original templates remain unmodified)
 
 The generated files in `dist-config/` are git-ignored. Before deploying, replace `<GITEA_HOST>` in `dist-config/values-rhdh.yaml` with your Gitea hostname.

@@ -1,0 +1,30 @@
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: cfidp-system
+  annotations:
+    backstage-gitea.io/github-compatible: "true"
+spec:
+  owner: platform
+  type: system
+  parameters:
+    - properties:
+        repoUrl:
+          type: string
+          ui:field: RepoUrlPicker
+          ui:options:
+            allowedHosts: [github.com]
+  steps:
+    - id: publish
+      action: publish:github
+      input:
+        repoUrl: github.com?repo=${{ parameters.system_name }}-system&owner=${{ steps['fetch-domain'].output.entity.metadata.labels['git-org'] }}
+    - id: pr
+      action: publish:github:pull-request
+      input:
+        repoUrl: github.com?repo=${{ parameters.system_name }}-system&owner=${{ steps['fetch-domain'].output.entity.metadata.labels['git-org'] }}
+  output:
+    links:
+      - url: ${{ steps.publish.output.remoteUrl }}
+      - url: ${{ steps.publish.output.repoContentsUrl }}
+      - url: ${{ steps.pr.output.remoteUrl }}

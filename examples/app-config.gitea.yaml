@@ -16,23 +16,10 @@ catalog:
         schedule:
           frequency: { minutes: 30 }
           timeout: { minutes: 3 }
-    github:
-      cfidp:
-        host: gitea.apps.example.com
-        organization: agent-workspace
-        catalogPath: /catalog-info.yaml
-        filters:
-          branch: main
-        schedule:
-          frequency: { minutes: 10 }
-          timeout: { minutes: 3 }
 
 gitea:
   githubCompatibility:
     enabled: true
-    providers:
-      - githubProviderId: cfidp
-        giteaIntegrationHost: gitea.apps.example.com
     templates:
       annotation: backstage-gitea.io/github-compatible
       allowedHosts:

@@ -19,7 +19,7 @@ import { InputError } from '@backstage/errors';
 import { ScmIntegrationRegistry } from '@backstage/integration';
 import { z } from 'zod';
 import path from 'node:path';
-import { createGiteaClient } from './giteaClient';
+import { createGiteaClient, GiteaApiError } from './giteaClient';
 
 export const giteaPullRequestInputSchema = z.object({
   repoUrl: z.string().describe('Target repository URL in Backstage repoUrl format'),
@@ -61,9 +61,7 @@ type Options = {
 };
 
 type ContentsResponse = {
-  content?: {
-    sha?: string;
-  };
+  sha?: string;
 };
 
 function trimSlash(value: string): string {
@@ -139,32 +137,81 @@ export function createGiteaPullRequestAction(options: Options) {
       });
       const commitMessage = input.commitMessage ?? input.title;
 
-      // Handle createWhenEmpty - skip if no files and not creating when empty
-      if (files.length === 0 && !input.createWhenEmpty) {
+      if (files.length === 0 && input.filesToDelete.length === 0 && !input.createWhenEmpty) {
         ctx.logger.warn(`No files found in ${sourceDir} and createWhenEmpty is false; skipping PR creation`);
         return;
       }
 
-      // Delete requested files first
+      let sourceBranchReady = false;
+      const ensureSourceBranch = async () => {
+        if (sourceBranchReady) return;
+        const branchPath = client.repoPath(
+          `/branches/${encodeURIComponent(input.branchName)}`,
+        );
+        try {
+          await client.request(branchPath);
+        } catch (error) {
+          if (!(error instanceof GiteaApiError) || error.status !== 404) {
+            throw new Error(
+              `Failed to inspect source branch '${input.branchName}': ${error}`,
+            );
+          }
+          await client.request(client.repoPath('/branches'), {
+            method: 'POST',
+            body: JSON.stringify({
+              new_branch_name: input.branchName,
+              old_branch_name: input.targetBranchName,
+            }),
+          });
+        }
+        sourceBranchReady = true;
+      };
+
       if (input.filesToDelete.length > 0) {
+        await ensureSourceBranch();
         ctx.logger.info(`Deleting ${input.filesToDelete.length} files from ${repo.owner}/${repo.repo}:${input.branchName}`);
         for (const filePath of input.filesToDelete) {
           const encodedPath = filePath.split('/').map(encodeURIComponent).join('/');
+          let existing: ContentsResponse;
           try {
-            await client.request(
+            existing = await client.request<ContentsResponse>(
               client.repoPath(`/contents/${encodedPath}?ref=${encodeURIComponent(input.branchName)}`),
-              { method: 'DELETE' },
             );
-          } catch (e) {
-            // File may not exist on this branch yet, that's okay
-            ctx.logger.warn(`Failed to delete file ${filePath}: ${e}`);
+          } catch (error) {
+            if (error instanceof GiteaApiError && error.status === 404) {
+              ctx.logger.info(`File ${filePath} is already absent from ${input.branchName}`);
+              continue;
+            }
+            throw new Error(
+              `Failed to inspect file '${filePath}' for deletion from '${input.branchName}': ${error}`,
+            );
+          }
+          if (!existing.sha) {
+            throw new Error(
+              `Gitea did not return a SHA for '${filePath}' on '${input.branchName}'`,
+            );
+          }
+          try {
+            await client.request(client.repoPath(`/contents/${encodedPath}`), {
+              method: 'DELETE',
+              body: JSON.stringify({
+                branch: input.branchName,
+                sha: existing.sha,
+                message: commitMessage,
+              }),
+            });
+          } catch (error) {
+            throw new Error(
+              `Failed to delete file '${filePath}' from '${input.branchName}': ${error}`,
+            );
           }
         }
+      } else if (files.length === 0 && input.createWhenEmpty) {
+        await ensureSourceBranch();
       }
 
       if (files.length > 0) {
         ctx.logger.info(`Publishing ${files.length} files to ${repo.owner}/${repo.repo}:${input.branchName}`);
-        let sourceBranchReady = false;
 
         for (const file of files) {
           const repoFilePath = joinRepoPath(input.targetPath, file.path);
@@ -175,9 +222,13 @@ export function createGiteaPullRequestAction(options: Options) {
             const existing = await client.request<ContentsResponse>(
               client.repoPath(`/contents/${encodedPath}?ref=${encodeURIComponent(input.branchName)}`),
             );
-            existingSha = existing.content?.sha;
-          } catch (e) {
-            // If the branch or file does not exist, fall through and create it.
+            existingSha = existing.sha;
+          } catch (error) {
+            if (!(error instanceof GiteaApiError) || error.status !== 404) {
+              throw new Error(
+                `Failed to inspect '${repoFilePath}' on '${input.branchName}': ${error}`,
+              );
+            }
           }
 
           const payload: Record<string, unknown> = {
@@ -187,6 +238,7 @@ export function createGiteaPullRequestAction(options: Options) {
 
           if (existingSha) {
             payload.sha = existingSha;
+            payload.branch = input.branchName;
             sourceBranchReady = true;
           } else if (sourceBranchReady) {
             payload.branch = input.branchName;

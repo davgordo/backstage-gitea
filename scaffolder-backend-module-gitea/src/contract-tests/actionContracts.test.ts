@@ -18,10 +18,6 @@ function jsonSchema(action: any, side: 'input' | 'output'): any {
   if (!schema) throw new Error(`Action ${action.id} does not expose its ${side} schema`);
   if (typeof schema === 'object' && schema.properties) return schema;
   if (typeof schema?.toJSON === 'function') return schema.toJSON();
-  if (schema?._def) {
-    const { zodToJsonSchema } = require('zod-to-json-schema');
-    return zodToJsonSchema(schema);
-  }
   return schema;
 }
 
@@ -32,6 +28,42 @@ function properties(action: any, side: 'input' | 'output'): Record<string, any> 
 function zodProperties(schema: any): Record<string, any> {
   const shape = typeof schema.shape === 'function' ? schema.shape() : schema.shape;
   return shape ?? {};
+}
+
+function zodField(field: any) {
+  const acceptsUndefined = field.safeParse(undefined).success;
+  let current = field;
+  let defaultValue: unknown;
+  while (current?._def?.innerType) {
+    if (current._def.typeName === 'ZodDefault') {
+      defaultValue = current._def.defaultValue();
+    }
+    current = current._def.innerType;
+  }
+  const typeName = current?._def?.typeName;
+  const types: Record<string, string> = {
+    ZodString: 'string',
+    ZodEnum: 'string',
+    ZodNumber: 'number',
+    ZodBoolean: 'boolean',
+    ZodArray: 'array',
+    ZodObject: 'object',
+  };
+  const type = types[typeName] ?? typeName;
+  return { required: !acceptsUndefined, type, defaultValue };
+}
+
+function jsonField(action: any, side: 'input' | 'output', name: string) {
+  const schema = jsonSchema(action, side);
+  const property = schema.properties[name];
+  let type = property.type ?? property.anyOf?.[0]?.type;
+  if (!type && property.items) type = 'array';
+  if (!type && property.enum) type = 'string';
+  return {
+    required: (schema.required ?? []).includes(name),
+    type,
+    defaultValue: property.default,
+  };
 }
 
 describe('GitHub-to-Gitea public action contracts', () => {
@@ -46,13 +78,29 @@ describe('GitHub-to-Gitea public action contracts', () => {
     'gitea:webhook': createGiteaWebhookAction({ integrations }),
   };
 
+  function outputProperties(replacement: string): Record<string, any> {
+    if (replacement === 'publish:gitea:pull-request') {
+      return zodProperties(giteaPullRequestOutputSchema);
+    }
+    if (replacement === 'gitea:webhook') {
+      return zodProperties(giteaWebhookOutputSchema);
+    }
+    return properties(gitea[replacement as keyof typeof gitea], 'output');
+  }
+
+  function inputNames(replacement: string): string[] {
+    if (replacement === 'publish:gitea:pull-request') {
+      return Object.keys(zodProperties(giteaPullRequestInputSchema));
+    }
+    if (replacement === 'gitea:webhook') {
+      return Object.keys(zodProperties(giteaWebhookInputSchema));
+    }
+    return Object.keys(properties(gitea[replacement as keyof typeof gitea], 'input'));
+  }
+
   for (const [githubId, contract] of Object.entries(compatibilityContracts)) {
     it(`${githubId} has all guaranteed outputs on ${contract.replacement}`, () => {
-      const outputs = contract.replacement === 'publish:gitea:pull-request'
-        ? zodProperties(giteaPullRequestOutputSchema)
-        : contract.replacement === 'gitea:webhook'
-          ? zodProperties(giteaWebhookOutputSchema)
-          : properties(gitea[contract.replacement as keyof typeof gitea], 'output');
+      const outputs = outputProperties(contract.replacement);
       for (const output of contract.requiredOutputs ?? []) expect(outputs).toHaveProperty(output);
     });
   }
@@ -61,17 +109,70 @@ describe('GitHub-to-Gitea public action contracts', () => {
     it(`classifies every ${githubId} input and rejects upstream drift`, () => {
       const upstream = Object.keys(properties(github[githubId], 'input'));
       const replacement = compatibilityContracts[githubId].replacement;
-      const supported = replacement === 'publish:gitea:pull-request'
-        ? Object.keys(zodProperties(giteaPullRequestInputSchema))
-        : replacement === 'gitea:webhook'
-          ? Object.keys(zodProperties(giteaWebhookInputSchema))
-          : Object.keys(properties(gitea[replacement], 'input'));
+      const supported = inputNames(replacement);
       const rejected = 'rejected' in compatibilityContracts[githubId] ? compatibilityContracts[githubId].rejected : [];
       const classified = new Set([...supported, ...rejected]);
       const unclassified = upstream.filter(name => !classified.has(name));
-      if (unclassified.length) throw new Error(`Unclassified GitHub action input: ${unclassified.map(name => `${githubId}.${name}`).join(', ')}`);
+      expect(unclassified.map(name => `${githubId}.${name}`)).toEqual([]);
+
+      const extensions = new Set(compatibilityContracts[githubId].giteaInputExtensions);
+      const unclassifiedGitea = supported.filter(
+        name => !upstream.includes(name) && !extensions.has(name as never),
+      );
+      expect(unclassifiedGitea.map(name => `${replacement}.${name}`)).toEqual([]);
     });
   }
+
+  it.each([
+    ['publish:github:pull-request', 'publish:gitea:pull-request', giteaPullRequestInputSchema],
+    ['github:webhook', 'gitea:webhook', giteaWebhookInputSchema],
+  ] as const)('keeps common %s input types and requiredness compatible', (githubId, _giteaId, schema) => {
+    const upstreamNames = Object.keys(properties(github[githubId], 'input'));
+    const giteaNames = Object.keys(zodProperties(schema));
+    const exceptions = new Set(compatibilityContracts[githubId].requirednessDifferences);
+    const commonNames = upstreamNames.filter(input => giteaNames.includes(input));
+    const actual = commonNames.map(name => {
+      const upstream = jsonField(github[githubId], 'input', name);
+      const replacement = zodField(zodProperties(schema)[name]);
+      return {
+        name,
+        type: replacement.type,
+        expectedType: upstream.type,
+        required: exceptions.has(name as never) ? upstream.required : replacement.required,
+        expectedRequired: upstream.required,
+      };
+    });
+    expect(actual).toEqual(actual.map(field => ({
+      ...field,
+      type: field.expectedType,
+      required: field.expectedRequired,
+    })));
+  });
+
+  it('keeps common publish input types and requiredness compatible', () => {
+    const githubAction = github['publish:github'];
+    const giteaAction = gitea['publish:gitea'];
+    const githubNames = Object.keys(properties(githubAction, 'input'));
+    const giteaNames = Object.keys(properties(giteaAction, 'input'));
+    const exceptions = new Set(compatibilityContracts['publish:github'].requirednessDifferences);
+    const commonNames = githubNames.filter(input => giteaNames.includes(input));
+    const actual = commonNames.map(name => {
+      const upstream = jsonField(githubAction, 'input', name);
+      const replacement = jsonField(giteaAction, 'input', name);
+      return {
+        name,
+        type: replacement.type,
+        expectedType: upstream.type,
+        required: exceptions.has(name as never) ? upstream.required : replacement.required,
+        expectedRequired: upstream.required,
+      };
+    });
+    expect(actual).toEqual(actual.map(field => ({
+      ...field,
+      type: field.expectedType,
+      required: field.expectedRequired,
+    })));
+  });
 
   it('aligns createWhenEmpty and webhook contentType defaults', () => {
     const githubPr = properties(github['publish:github:pull-request'], 'input');

@@ -257,12 +257,14 @@ describe('publish:gitea:pull-request', () => {
 
   it('should use existing file sha when updating', async () => {
     let capturedPayload: Record<string, unknown> | undefined;
+    let inspectedRef: string | null = null;
     server.use(
-      rest.get('https://gitea.com/api/v1/repos/:owner/:repo/contents/*', (_req, res, ctx) => {
+      rest.get('https://gitea.com/api/v1/repos/:owner/:repo/contents/*', (req, res, ctx) => {
+        inspectedRef = req.url.searchParams.get('ref');
         return res(
           ctx.status(200),
           ctx.set('Content-Type', 'application/json'),
-          ctx.json({ content: { sha: 'existing-sha' } }),
+          ctx.json({ sha: 'existing-sha' }),
         );
       }),
       rest.put('https://gitea.com/api/v1/repos/:owner/:repo/contents/*', async (req, res, ctx) => {
@@ -293,7 +295,9 @@ describe('publish:gitea:pull-request', () => {
     await action.handler(mockContext);
 
     expect(capturedPayload).toBeDefined();
+    expect(inspectedRef).toBe('feature/update');
     expect(capturedPayload!.sha).toBe('existing-sha');
+    expect(capturedPayload!.branch).toBe('feature/update');
     expect(capturedPayload!.ref).toBeUndefined();
     expect(capturedPayload!.new_branch).toBeUndefined();
     expect(mockContext.output).toHaveBeenCalledWith('pullRequestNumber', 2);
@@ -327,13 +331,28 @@ describe('publish:gitea:pull-request', () => {
     expect(serializeSpy).not.toHaveBeenCalled();
   });
 
-  it('should delete files before publishing new ones', async () => {
+  it('creates the source branch and deletes files with the Gitea Contents API contract', async () => {
+    const calls: string[] = [];
+    const deleteBodies: Record<string, unknown>[] = [];
     server.use(
-      rest.delete('https://gitea.com/api/v1/repos/:owner/:repo/contents/*', (_req, res, ctx) => {
-        return res(ctx.status(200));
-      }),
-      rest.get('https://gitea.com/api/v1/repos/:owner/:repo/contents/*', (_req, res, ctx) => {
+      rest.get('https://gitea.com/api/v1/repos/:owner/:repo/branches/:branch', (req, res, ctx) => {
+        calls.push(`GET branch ${req.params.branch}`);
         return res(ctx.status(404), ctx.text('not found'));
+      }),
+      rest.post('https://gitea.com/api/v1/repos/:owner/:repo/branches', async (req, res, ctx) => {
+        calls.push(`POST branch ${JSON.stringify(await req.json())}`);
+        return res(ctx.status(201), ctx.json({ name: 'feature/test' }));
+      }),
+      rest.get('https://gitea.com/api/v1/repos/:owner/:repo/contents/*', (req, res, ctx) => {
+        calls.push(`GET content ${req.url.searchParams.get('ref')}`);
+        if (req.url.pathname.endsWith('old-file.txt')) return res(ctx.status(200), ctx.json({ sha: 'old-sha' }));
+        if (req.url.pathname.endsWith('another-old.txt')) return res(ctx.status(404), ctx.text('not found'));
+        return res(ctx.status(404), ctx.text('new file'));
+      }),
+      rest.delete('https://gitea.com/api/v1/repos/:owner/:repo/contents/*', async (req, res, ctx) => {
+        calls.push('DELETE content');
+        deleteBodies.push(await req.json());
+        return res(ctx.status(204));
       }),
       rest.post('https://gitea.com/api/v1/repos/:owner/:repo/contents/*', (_req, res, ctx) => {
         return res(
@@ -359,13 +378,50 @@ describe('publish:gitea:pull-request', () => {
         repoUrl: 'gitea.com?owner=owner&repo=repo',
         branchName: 'feature/test',
         title: 'Delete and add files',
+        commitMessage: 'Apply smoke changes',
+        targetBranchName: 'main',
         filesToDelete: ['old-file.txt', 'another-old.txt'],
       },
     });
 
     await action.handler(mockContext);
 
+    expect(deleteBodies).toEqual([{ branch: 'feature/test', sha: 'old-sha', message: 'Apply smoke changes' }]);
+    expect(calls[0]).toBe('GET branch feature/test');
+    expect(calls[1]).toContain('POST branch');
+    expect(calls[1]).toContain('"new_branch_name":"feature/test"');
+    expect(calls[1]).toContain('"old_branch_name":"main"');
+    expect(calls.indexOf('DELETE content')).toBeGreaterThan(calls.findIndex(call => call.startsWith('POST branch')));
     expect(mockContext.output).toHaveBeenCalledWith('pullRequestNumber', 1);
+  });
+
+  it('fails on non-404 errors while inspecting a deletion', async () => {
+    server.use(
+      rest.get('https://gitea.com/api/v1/repos/:owner/:repo/branches/:branch', (_req, res, ctx) => res(ctx.status(200), ctx.json({ name: 'feature/delete' }))),
+      rest.get('https://gitea.com/api/v1/repos/:owner/:repo/contents/*', (_req, res, ctx) => res(ctx.status(503), ctx.text('unavailable'))),
+    );
+    const mockContext = createMockActionContext({ input: {
+      repoUrl: 'gitea.com?owner=owner&repo=repo', branchName: 'feature/delete',
+      title: 'Delete', filesToDelete: ['old.txt'],
+    } });
+    await expect(action.handler(mockContext)).rejects.toThrow(
+      "Failed to inspect file 'old.txt' for deletion from 'feature/delete'",
+    );
+  });
+
+  it('fails on non-successful deletion responses', async () => {
+    server.use(
+      rest.get('https://gitea.com/api/v1/repos/:owner/:repo/branches/:branch', (_req, res, ctx) => res(ctx.status(200), ctx.json({ name: 'feature/delete' }))),
+      rest.get('https://gitea.com/api/v1/repos/:owner/:repo/contents/*', (_req, res, ctx) => res(ctx.status(200), ctx.json({ sha: 'old-sha' }))),
+      rest.delete('https://gitea.com/api/v1/repos/:owner/:repo/contents/*', (_req, res, ctx) => res(ctx.status(500), ctx.text('delete failed'))),
+    );
+    const mockContext = createMockActionContext({ input: {
+      repoUrl: 'gitea.com?owner=owner&repo=repo', branchName: 'feature/delete',
+      title: 'Delete', filesToDelete: ['old.txt'],
+    } });
+    await expect(action.handler(mockContext)).rejects.toThrow(
+      "Failed to delete file 'old.txt' from 'feature/delete'",
+    );
   });
 
   it('should request reviewers and assignees on the PR', async () => {
@@ -485,6 +541,8 @@ describe('publish:gitea:pull-request', () => {
     serializeSpy.mockResolvedValue([]);
 
     server.use(
+      rest.get('https://gitea.com/api/v1/repos/:owner/:repo/branches/:branch', (_req, res, ctx) => res(ctx.status(404), ctx.text('not found'))),
+      rest.post('https://gitea.com/api/v1/repos/:owner/:repo/branches', (_req, res, ctx) => res(ctx.status(201), ctx.json({ name: 'feature/empty' }))),
       rest.post('https://gitea.com/api/v1/repos/:owner/:repo/pulls', (_req, res, ctx) => {
         return res(
           ctx.status(200),

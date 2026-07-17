@@ -5,6 +5,8 @@ export const compatibilityContracts = {
     replacement: 'publish:gitea',
     requiredOutputs: ['remoteUrl', 'repoContentsUrl', 'commitHash'],
     giteaExtensions: ['repoId'],
+    giteaInputExtensions: ['signCommit'],
+    requirednessDifferences: ['description'],
     rejected: [
       'bypassPullRequestAllowances', 'restrictions',
       'requiredConversationResolution', 'requireLastPushApproval',
@@ -22,10 +24,14 @@ export const compatibilityContracts = {
     acceptedNoOp: ['gitAuthorName', 'gitAuthorEmail', 'forceEmptyGitAuthor', 'draft'],
     rejected: ['forceFork'],
     giteaExtensions: ['pullRequestUrl', 'branchName'],
+    giteaInputExtensions: [],
+    requirednessDifferences: ['description'],
   },
   'github:webhook': {
     replacement: 'gitea:webhook',
     comparedInputs: ['repoUrl', 'webhookUrl', 'webhookSecret', 'events', 'active', 'contentType', 'insecureSsl', 'token'],
     giteaExtensions: ['httpMethod', 'branchFilter', 'hookId', 'hookUrl'],
+    giteaInputExtensions: ['httpMethod', 'branchFilter'],
+    requirednessDifferences: [],
   },
 } as const;

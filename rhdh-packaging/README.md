@@ -1,15 +1,16 @@
 # RHDH Packaging
 
-Packages the Gitea catalog and scaffolder modules as **RHDH dynamic plugins** and publishes them to the `@${GITEA_NPM_SCOPE}` Gitea npm registry.
+Packages the standard Gitea catalog module, enhanced scaffolder module, and GitHub-authored Template compatibility module as **RHDH dynamic plugins** and publishes them to the `@${GITEA_NPM_SCOPE}` Gitea npm registry.
 
 ## What's Published
 
 | Plugin | Source | Version (RHDH 1.10.1 / Backstage 1.49.4) |
 |---|---|---|
 | `@${GITEA_NPM_SCOPE}/plugin-catalog-backend-module-gitea-dynamic` | Upstream 0.1.10 from npmjs | 0.1.10-rhdh.1.10.1.1 |
-| `@${GITEA_NPM_SCOPE}/plugin-scaffolder-backend-module-gitea-dynamic` | Local custom source based on upstream 0.2.19 | 0.2.19-rhdh.1.10.1.1 |
+| `@${GITEA_NPM_SCOPE}/plugin-scaffolder-backend-module-gitea-dynamic` | Local custom source based on upstream 0.2.19 | 0.2.19-rhdh.1.10.1.3 |
+| `@${GITEA_NPM_SCOPE}/plugin-catalog-backend-module-gitea-github-compat-dynamic` | Local Template compatibility module | 0.1.0-rhdh.1.10.1.2 |
 
-Both packages have `@backstage/*` dependencies migrated to `peerDependencies` for RHDH compatibility.
+All three packages have `@backstage/*` dependencies migrated to `peerDependencies` for RHDH compatibility.
 Published versions use the suffix `-rhdh.<target-version>.<revision>` to make
 their intended RHDH runtime and custom packaging revision explicit.
 
@@ -26,7 +27,9 @@ rhdh-packaging/
 │   ├── prepare-package.mjs         # Shared npm package metadata transformation
 │   └── publish-both-plugins.sh     # Unified pipeline: stage → publish → validate → update config
 └── smoke-test/
-    └── template.yaml               # Scaffolder template to verify all Gitea actions
+    ├── direct-gitea-template.yaml  # Direct action smoke test
+    ├── github-compat-template.yaml # GitHub-shaped mutation smoke test
+    └── skeleton/                   # Minimal workspace inputs
 ```
 
 Generated artifacts (git-ignored):
@@ -108,7 +111,7 @@ Increment the final revision component whenever packaging, metadata, or local
 source changes require a new artifact for the same RHDH target. For example:
 
 ```text
-0.2.19-rhdh.1.10.1.1 -> 0.2.19-rhdh.1.10.1.2
+0.2.19-rhdh.1.10.1.2 -> 0.2.19-rhdh.1.10.1.3
 ```
 
 ## One-Command Pipeline
@@ -118,17 +121,18 @@ cd rhdh-packaging
 ./scripts/publish-both-plugins.sh
 ```
 
-This runs 5 steps end-to-end:
+This runs 6 steps end-to-end:
 
 | Step | Action |
 |---|---|
 | **A) Stage catalog** | Fetch from npmjs and stage as an RHDH-compatible npm package |
 | **B) Stage scaffolder** | Build from local source and stage as an RHDH-compatible npm package |
-| **C) Publish** | Push both as `@${GITEA_NPM_SCOPE}/*-dynamic` to the Gitea npm registry (skips if already published) |
-| **D) Validate** | Fetch back from registry, strictly verify package identity and structure, and compute integrity |
-| **E) Generate config** | Render versions, SHA-256 hashes, registry URLs, and deployment npm credentials into `dist-config/` |
+| **C) Stage compatibility** | Build the local Template processor catalog module |
+| **D) Publish** | Push all three as `@${GITEA_NPM_SCOPE}/*-dynamic` to the Gitea npm registry (skips if already published) |
+| **E) Validate** | Fetch back from registry, strictly verify package identity and structure, and compute integrity |
+| **F) Generate config** | Render versions, SHA-256 hashes, registry URLs, and deployment npm credentials into `dist-config/` |
 
-Both plugins pass through the same package-staging function. The pipeline
+All three plugins pass through the same package-staging function. The pipeline
 creates standard npm packages directly; it does not construct and re-extract
 intermediate RHDH tarballs.
 
@@ -169,7 +173,7 @@ helm upgrade --install rhdh redhat-developer-hub/rhdh \
 
 ### 4. Smoke test
 
-Import `smoke-test/template.yaml` into RHDH and run it to verify all scaffolder actions.
+Import both `smoke-test/direct-gitea-template.yaml` and `smoke-test/github-compat-template.yaml` into RHDH. Follow `smoke-test/README.md` to verify direct actions and processed GitHub-shaped actions.
 
 ## Gitea Configuration
 

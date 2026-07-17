@@ -1,0 +1,80 @@
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: github-shaped-gitea-compat-smoke-test
+  title: GitHub-shaped Gitea Compatibility Smoke Test
+  description: Verifies that a marked GitHub-authored template is processed into Gitea actions.
+  annotations:
+    backstage-gitea.io/github-compatible: "true"
+spec:
+  owner: guest
+  type: service
+  parameters:
+    - title: Compatibility target
+      required: [owner, newRepo, webhookUrl, giteaToken]
+      properties:
+        owner:
+          title: Owner or organization
+          type: string
+        newRepo:
+          title: New repository name
+          type: string
+        webhookUrl:
+          title: Webhook receiver URL
+          type: string
+          format: uri
+        giteaToken:
+          title: Gitea personal access token
+          type: string
+          ui:field: Secret
+  steps:
+    - id: fetchInitial
+      name: Fetch initial content
+      action: fetch:template
+      input:
+        url: ./skeleton/initial
+        targetPath: initial
+        values:
+          repository: ${{ parameters.newRepo }}
+    - id: fetchChange
+      name: Fetch pull-request content
+      action: fetch:template
+      input:
+        url: ./skeleton/change
+        targetPath: change
+        values:
+          repository: ${{ parameters.newRepo }}
+    - id: publish
+      name: Publish repository
+      action: publish:github
+      input:
+        repoUrl: github.com?repo=${{ parameters.newRepo }}&owner=${{ parameters.owner }}
+        description: Repository created by the GitHub-shaped compatibility smoke test
+        sourcePath: initial
+        defaultBranch: main
+        repoVisibility: private
+        token: ${{ secrets.giteaToken }}
+    - id: addWebhook
+      name: Add webhook
+      action: github:webhook
+      input:
+        repoUrl: github.com?repo=${{ parameters.newRepo }}&owner=${{ parameters.owner }}
+        webhookUrl: ${{ parameters.webhookUrl }}
+        events: [push]
+        token: ${{ secrets.giteaToken }}
+    - id: createPr
+      name: Create pull request
+      action: publish:github:pull-request
+      input:
+        repoUrl: github.com?repo=${{ parameters.newRepo }}&owner=${{ parameters.owner }}
+        branchName: smoke-test-change
+        targetBranchName: main
+        title: Add compatibility smoke-test change
+        description: Verifies the mapped Gitea pull-request action.
+        sourcePath: change
+        targetPath: smoke-test
+        token: ${{ secrets.giteaToken }}
+  output:
+    repoUrl: ${{ steps.publish.output.remoteUrl }}
+    webhookId: ${{ steps.addWebhook.output.hookId }}
+    prUrl: ${{ steps.createPr.output.remoteUrl }}

@@ -85,6 +85,17 @@ export type CreateGiteaClientOptions = ResolveGiteaRepoOptions & {
   token?: string;
 };
 
+export class GiteaApiError extends Error {
+  constructor(
+    readonly status: number,
+    readonly method: string,
+    readonly path: string,
+    body: string,
+  ) {
+    super(`Gitea API ${method} ${path} failed: ${status}: ${body}`);
+  }
+}
+
 export class GiteaClient {
   private readonly repo: GiteaRepo;
   private readonly token?: string;
@@ -115,7 +126,12 @@ export class GiteaClient {
 
     if (!response.ok) {
       const body = await response.text();
-      throw new Error(`Gitea API ${options.method ?? 'GET'} ${path} failed: ${response.status} ${response.statusText}: ${body}`);
+      throw new GiteaApiError(
+        response.status,
+        options.method ?? 'GET',
+        path,
+        body,
+      );
     }
 
     if (response.status === 204) {
