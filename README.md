@@ -29,7 +29,7 @@ rhdh-packaging/
   README.md
   dynamic-plugins.yaml
   values-rhdh.yaml
-  scripts/publish-both-plugins.sh 
+  scripts/publish-all-plugins.sh
   config
 
 openshift-gitea/
@@ -73,7 +73,7 @@ The unified pipeline stages the standard catalog, scaffolder, and Template compa
 ```bash
 cd rhdh-packaging
 # Requires .env with GITEA_BASE_URL, GITEA_TOKEN, and GITEA_NPM_SCOPE at the project root
-./scripts/publish-both-plugins.sh
+./scripts/publish-all-plugins.sh
 ```
 
 This performs 6 steps:

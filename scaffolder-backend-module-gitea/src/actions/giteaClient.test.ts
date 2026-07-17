@@ -15,8 +15,14 @@
  */
 
 import { ConfigReader } from '@backstage/config';
+import { registerMswTestHooks } from '@backstage/backend-test-utils';
 import { ScmIntegrations } from '@backstage/integration';
-import { resolveGiteaRepo } from './giteaClient';
+import { rest } from 'msw';
+import { setupServer } from 'msw/node';
+import { GiteaClient, resolveGiteaRepo } from './giteaClient';
+
+const server = setupServer();
+registerMswTestHooks(server);
 
 describe('resolveGiteaRepo', () => {
   it('uses the default Gitea API path when apiBaseUrl is not configured', () => {
@@ -68,5 +74,43 @@ describe('resolveGiteaRepo', () => {
         integrations,
       }).apiBaseUrl,
     ).toBe('https://api.gitea.example.com/custom');
+  });
+});
+
+describe('GiteaClient.getContents', () => {
+  it('encodes path segments and ref, authenticates, and forwards the abort signal', async () => {
+    const signal = new AbortController().signal;
+    const fetchSpy = jest.spyOn(globalThis, 'fetch');
+    server.use(
+      rest.get(
+        'https://gitea.example.com/api/v1/repos/owner/repo/contents/*',
+        (req, res, ctx) => {
+          expect(req.url.pathname).toBe(
+            '/api/v1/repos/owner/repo/contents/nested%20dir/file%23.txt',
+          );
+          expect(req.url.searchParams.get('ref')).toBe('feature/a b');
+          expect(req.headers.get('Authorization')).toBe('token user-token');
+          return res(ctx.status(200), ctx.json({ sha: 'blob' }));
+        },
+      ),
+    );
+    const client = new GiteaClient({
+      repo: {
+        host: 'gitea.example.com',
+        owner: 'owner',
+        repo: 'repo',
+        apiBaseUrl: 'https://gitea.example.com/api/v1',
+        repoUrl: 'https://gitea.example.com/owner/repo',
+      },
+      token: 'user-token',
+    });
+
+    await expect(
+      client.getContents('nested dir/file#.txt', 'feature/a b', signal),
+    ).resolves.toEqual({ sha: 'blob' });
+    expect(fetchSpy).toHaveBeenCalledWith(
+      'https://gitea.example.com/api/v1/repos/owner/repo/contents/nested%20dir/file%23.txt?ref=feature%2Fa%20b',
+      expect.objectContaining({ signal }),
+    );
   });
 });

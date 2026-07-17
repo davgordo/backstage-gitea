@@ -7,7 +7,7 @@ Packages the standard Gitea catalog module, enhanced scaffolder module, and GitH
 | Plugin | Source | Version (RHDH 1.10.1 / Backstage 1.49.4) |
 |---|---|---|
 | `@${GITEA_NPM_SCOPE}/plugin-catalog-backend-module-gitea-dynamic` | Upstream 0.1.10 from npmjs | 0.1.10-rhdh.1.10.1.1 |
-| `@${GITEA_NPM_SCOPE}/plugin-scaffolder-backend-module-gitea-dynamic` | Local custom source based on upstream 0.2.19 | 0.2.19-rhdh.1.10.1.3 |
+| `@${GITEA_NPM_SCOPE}/plugin-scaffolder-backend-module-gitea-dynamic` | Local custom source based on upstream 0.2.19 | 0.2.19-rhdh.1.10.1.6 |
 | `@${GITEA_NPM_SCOPE}/plugin-catalog-backend-module-gitea-github-compat-dynamic` | Local Template compatibility module | 0.1.0-rhdh.1.10.1.2 |
 
 All three packages have `@backstage/*` dependencies migrated to `peerDependencies` for RHDH compatibility.
@@ -25,7 +25,7 @@ rhdh-packaging/
 ├── values-rhdh.yaml                # Template — Helm values for RHDH deployment
 ├── scripts/
 │   ├── prepare-package.mjs         # Shared npm package metadata transformation
-│   └── publish-both-plugins.sh     # Unified pipeline: stage → publish → validate → update config
+│   └── publish-all-plugins.sh      # Unified pipeline: stage → publish → validate → update config
 └── smoke-test/
     ├── direct-gitea-template.yaml  # Direct action smoke test
     ├── github-compat-template.yaml # GitHub-shaped mutation smoke test
@@ -85,7 +85,7 @@ To target another RHDH version:
    - Align `dependencies`, `peerDependencies`, and `devDependencies` with the
      target Backstage release.
 6. Update `CATALOG_SOURCE_VERSION` and `CATALOG_VERSION` in
-   `scripts/publish-both-plugins.sh`:
+   `scripts/publish-all-plugins.sh`:
 
    ```bash
    CATALOG_SOURCE_VERSION="<matching-upstream-version>"
@@ -118,7 +118,7 @@ source changes require a new artifact for the same RHDH target. For example:
 
 ```bash
 cd rhdh-packaging
-./scripts/publish-both-plugins.sh
+./scripts/publish-all-plugins.sh
 ```
 
 This runs 6 steps end-to-end:
@@ -142,7 +142,7 @@ intermediate RHDH tarballs.
 
 ```bash
 # First, generate the config by running the publish script
-cd rhdh-packaging && ./scripts/publish-both-plugins.sh
+cd rhdh-packaging && ./scripts/publish-all-plugins.sh
 
 # Then create the secret from the generated npmrc
 kubectl create secret generic rhdh-npm-scope \
@@ -197,5 +197,5 @@ The original templates (`values-rhdh.yaml`, `dynamic-plugins.yaml`) are never mo
 | Problem | Fix |
 |---|---|
 | `E409` on publish | Version already exists on registry — rerun to confirm, or bump version |
-| Integrity mismatch in RHDH | Re-run `publish-both-plugins.sh` to regenerate `dist-config/` files |
+| Integrity mismatch in RHDH | Re-run `publish-all-plugins.sh` to regenerate `dist-config/` files |
 | Network timeout during publish | Re-run the script from the same directory |

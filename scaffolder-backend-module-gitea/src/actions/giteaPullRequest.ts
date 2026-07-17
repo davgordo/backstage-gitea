@@ -19,7 +19,11 @@ import { InputError } from '@backstage/errors';
 import { ScmIntegrationRegistry } from '@backstage/integration';
 import { z } from 'zod';
 import path from 'node:path';
-import { createGiteaClient, GiteaApiError } from './giteaClient';
+import {
+  createGiteaClient,
+  GiteaApiError,
+  GiteaBatchFileOperation,
+} from './giteaClient';
 
 export const giteaPullRequestInputSchema = z.object({
   repoUrl: z.string().describe('Target repository URL in Backstage repoUrl format'),
@@ -58,10 +62,6 @@ type Input = z.infer<typeof schema>;
 
 type Options = {
   integrations: ScmIntegrationRegistry;
-};
-
-type ContentsResponse = {
-  sha?: string;
 };
 
 function trimSlash(value: string): string {
@@ -145,11 +145,8 @@ export function createGiteaPullRequestAction(options: Options) {
       let sourceBranchReady = false;
       const ensureSourceBranch = async () => {
         if (sourceBranchReady) return;
-        const branchPath = client.repoPath(
-          `/branches/${encodeURIComponent(input.branchName)}`,
-        );
         try {
-          await client.request(branchPath);
+          await client.getBranch(input.branchName);
         } catch (error) {
           if (!(error instanceof GiteaApiError) || error.status !== 404) {
             throw new Error(
@@ -167,92 +164,108 @@ export function createGiteaPullRequestAction(options: Options) {
         sourceBranchReady = true;
       };
 
-      if (input.filesToDelete.length > 0) {
-        await ensureSourceBranch();
-        ctx.logger.info(`Deleting ${input.filesToDelete.length} files from ${repo.owner}/${repo.repo}:${input.branchName}`);
-        for (const filePath of input.filesToDelete) {
-          const encodedPath = filePath.split('/').map(encodeURIComponent).join('/');
-          let existing: ContentsResponse;
-          try {
-            existing = await client.request<ContentsResponse>(
-              client.repoPath(`/contents/${encodedPath}?ref=${encodeURIComponent(input.branchName)}`),
-            );
-          } catch (error) {
-            if (error instanceof GiteaApiError && error.status === 404) {
-              ctx.logger.info(`File ${filePath} is already absent from ${input.branchName}`);
-              continue;
-            }
-            throw new Error(
-              `Failed to inspect file '${filePath}' for deletion from '${input.branchName}': ${error}`,
-            );
-          }
-          if (!existing.sha) {
-            throw new Error(
-              `Gitea did not return a SHA for '${filePath}' on '${input.branchName}'`,
-            );
-          }
-          try {
-            await client.request(client.repoPath(`/contents/${encodedPath}`), {
-              method: 'DELETE',
-              body: JSON.stringify({
-                branch: input.branchName,
-                sha: existing.sha,
-                message: commitMessage,
-              }),
-            });
-          } catch (error) {
-            throw new Error(
-              `Failed to delete file '${filePath}' from '${input.branchName}': ${error}`,
-            );
-          }
-        }
-      } else if (files.length === 0 && input.createWhenEmpty) {
+      if (files.length === 0 && input.filesToDelete.length === 0 && input.createWhenEmpty) {
         await ensureSourceBranch();
       }
 
-      if (files.length > 0) {
-        ctx.logger.info(`Publishing ${files.length} files to ${repo.owner}/${repo.repo}:${input.branchName}`);
+      if (files.length > 0 || input.filesToDelete.length > 0) {
+        let baseBranch = input.branchName;
+        let branch;
+        try {
+          branch = await client.getBranch(input.branchName);
+          sourceBranchReady = true;
+        } catch (error) {
+          if (!(error instanceof GiteaApiError) || error.status !== 404) {
+            throw new Error(
+              `Failed to inspect source branch '${input.branchName}': ${error}`,
+            );
+          }
+          baseBranch = input.targetBranchName;
+          try {
+            branch = await client.getBranch(baseBranch);
+          } catch (targetError) {
+            throw new Error(
+              `Failed to inspect target branch '${baseBranch}': ${targetError}`,
+            );
+          }
+        }
 
+        const commitSha = branch.commit?.id ?? branch.commit?.sha;
+        if (!commitSha) {
+          throw new Error(
+            `Gitea did not return a commit SHA for branch '${baseBranch}'`,
+          );
+        }
+        const tree = await client.getRecursiveTree(commitSha);
+        if (tree.truncated) {
+          throw new Error(
+            `Gitea returned a truncated tree for branch '${baseBranch}'`,
+          );
+        }
+        const existingPaths = new Map(
+          (tree.tree ?? [])
+            .filter(entry => entry.type === 'blob' && entry.path && entry.sha)
+            .map(entry => [entry.path!, entry.sha!]),
+        );
+
+        const operations = new Map<string, GiteaBatchFileOperation>();
+        const renderedPaths = new Set<string>();
         for (const file of files) {
           const repoFilePath = joinRepoPath(input.targetPath, file.path);
-          const encodedPath = repoFilePath.split('/').map(encodeURIComponent).join('/');
-          let existingSha: string | undefined;
+          renderedPaths.add(repoFilePath);
+          const existingSha = existingPaths.get(repoFilePath);
+          operations.set(
+            repoFilePath,
+            existingSha
+              ? {
+                  operation: 'update',
+                  path: repoFilePath,
+                  content: Buffer.from(file.content).toString('base64'),
+                  sha: existingSha,
+                }
+              : {
+                  operation: 'create',
+                  path: repoFilePath,
+                  content: Buffer.from(file.content).toString('base64'),
+                },
+          );
+        }
 
-          try {
-            const existing = await client.request<ContentsResponse>(
-              client.repoPath(`/contents/${encodedPath}?ref=${encodeURIComponent(input.branchName)}`),
+        for (const filePath of input.filesToDelete) {
+          const normalizedPath = trimSlash(filePath);
+          if (renderedPaths.has(normalizedPath)) {
+            throw new InputError(
+              `Conflicting create/update and delete operations for '${normalizedPath}'`,
             );
-            existingSha = existing.sha;
-          } catch (error) {
-            if (!(error instanceof GiteaApiError) || error.status !== 404) {
-              throw new Error(
-                `Failed to inspect '${repoFilePath}' on '${input.branchName}': ${error}`,
-              );
-            }
           }
+          if (operations.has(normalizedPath)) continue;
+          const existingSha = existingPaths.get(normalizedPath);
+          if (!existingSha) {
+            ctx.logger.info(
+              `File ${normalizedPath} is already absent from ${baseBranch}`,
+            );
+            continue;
+          }
+          operations.set(normalizedPath, {
+            operation: 'delete',
+            path: normalizedPath,
+            sha: existingSha,
+          });
+        }
 
-          const payload: Record<string, unknown> = {
+        if (operations.size > 0) {
+          ctx.logger.info(
+            `Publishing ${operations.size} file changes to ${repo.owner}/${repo.repo}:${input.branchName}`,
+          );
+          await client.changeFiles({
+            branch: baseBranch,
+            ...(!sourceBranchReady ? { new_branch: input.branchName } : {}),
             message: commitMessage,
-            content: Buffer.from(file.content).toString('base64'),
-          };
-
-          if (existingSha) {
-            payload.sha = existingSha;
-            payload.branch = input.branchName;
-            sourceBranchReady = true;
-          } else if (sourceBranchReady) {
-            payload.branch = input.branchName;
-          } else {
-            payload.ref = input.targetBranchName;
-            payload.new_branch = input.branchName;
-          }
-
-          const method = existingSha ? 'PUT' : 'POST';
-          await client.request(client.repoPath(`/contents/${encodedPath}`), {
-            method,
-            body: JSON.stringify(payload),
+            files: [...operations.values()],
           });
           sourceBranchReady = true;
+        } else if (!sourceBranchReady) {
+          await ensureSourceBranch();
         }
       }
 

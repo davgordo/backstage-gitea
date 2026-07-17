@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Builds/fetches the three Gitea modules, stages them as RHDH-compatible npm
+# Builds/fetches all three Gitea modules, stages them as RHDH-compatible npm
 # packages, publishes them to Gitea, validates the published artifacts, and
 # renders deployment configuration.
 

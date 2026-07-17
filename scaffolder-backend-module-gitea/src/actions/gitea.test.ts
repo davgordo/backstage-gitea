@@ -15,7 +15,11 @@
  */
 import { ScmIntegrations } from '@backstage/integration';
 import { ConfigReader } from '@backstage/config';
-import { createPublishGiteaAction } from './gitea';
+import {
+  createPublishGiteaAction,
+  waitForGiteaRepositoryContents,
+} from './gitea';
+import { GiteaApiError, GiteaClient, GiteaRepo } from './giteaClient';
 import { initRepoAndPush } from '@backstage/plugin-scaffolder-node';
 import { rest } from 'msw';
 import { registerMswTestHooks } from '@backstage/backend-test-utils';
@@ -29,6 +33,162 @@ jest.mock('@backstage/plugin-scaffolder-node', () => {
       commitHash: '220f19cc36b551763d157f1b5e4a4b446165dbd6',
     }),
   };
+});
+
+describe('waitForGiteaRepositoryContents', () => {
+  const expectedCommit = 'pushed-commit';
+  const repo: GiteaRepo = {
+    host: 'gitea.com',
+    owner: 'org1',
+    repo: 'repo',
+    apiBaseUrl: 'https://gitea.com/api/v1',
+    repoUrl: 'https://gitea.com/org1/repo',
+  };
+  const logger = { info: jest.fn() };
+
+  function client(overrides: Partial<GiteaClient> = {}) {
+    return {
+      getBranch: jest.fn().mockResolvedValue({
+        commit: { id: expectedCommit },
+      }),
+      getRecursiveTree: jest.fn().mockResolvedValue({
+        tree: [{ type: 'blob', path: 'README.md', sha: 'blob-sha' }],
+      }),
+      getContents: jest.fn().mockResolvedValue({}),
+      ...overrides,
+    } as unknown as GiteaClient;
+  }
+
+  function run(clientInstance: GiteaClient, signal?: AbortSignal) {
+    return waitForGiteaRepositoryContents({
+      client: clientInstance,
+      repo,
+      branch: 'main',
+      expectedCommit,
+      signal,
+      logger,
+    });
+  }
+
+  beforeEach(() => {
+    jest.useFakeTimers();
+    logger.info.mockReset();
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it('retries a file-specific HTTP 500 and then succeeds', async () => {
+    const getContents = jest
+      .fn()
+      .mockRejectedValueOnce(
+        new GiteaApiError(500, 'GET', '/contents/README.md', 'not ready'),
+      )
+      .mockResolvedValueOnce({});
+    const result = run(client({ getContents } as Partial<GiteaClient>));
+
+    await jest.advanceTimersByTimeAsync(250);
+    await expect(result).resolves.toBeUndefined();
+    expect(getContents).toHaveBeenCalledTimes(2);
+    expect(getContents).toHaveBeenLastCalledWith(
+      'README.md',
+      'main',
+      undefined,
+    );
+    expect(initRepoAndPush).not.toHaveBeenCalled();
+  });
+
+  it.each([401, 403, 400])(
+    'fails immediately on terminal file HTTP %s with response details',
+    async status => {
+      const getContents = jest.fn().mockRejectedValue(
+        new GiteaApiError(status, 'GET', '/contents', 'terminal response'),
+      );
+
+      await expect(
+        run(client({ getContents } as Partial<GiteaClient>)),
+      ).rejects.toThrow(
+        new RegExp(`HTTP ${status}.*terminal response`),
+      );
+      expect(getContents).toHaveBeenCalledTimes(1);
+      expect(jest.getTimerCount()).toBe(0);
+    },
+  );
+
+  it('waits for the branch to resolve to the pushed commit', async () => {
+    const getBranch = jest
+      .fn()
+      .mockResolvedValueOnce({ commit: { id: 'older-commit' } })
+      .mockResolvedValueOnce({ commit: { id: expectedCommit } });
+    const clientInstance = client({ getBranch } as Partial<GiteaClient>);
+    const result = run(clientInstance);
+
+    await jest.advanceTimersByTimeAsync(250);
+    await expect(result).resolves.toBeUndefined();
+    expect(getBranch).toHaveBeenCalledTimes(2);
+    expect(clientInstance.getContents).toHaveBeenCalledTimes(1);
+  });
+
+  it('times out on persistent file HTTP 500 with complete diagnostics', async () => {
+    const getContents = jest.fn().mockRejectedValue(
+      new GiteaApiError(500, 'GET', '/contents', 'still indexing'),
+    );
+
+    const result = run(client({ getContents } as Partial<GiteaClient>));
+    const rejection = result.catch(error => error);
+    await jest.advanceTimersByTimeAsync(5_000);
+    expect(await rejection).toEqual(
+      expect.objectContaining({
+        message: expect.stringMatching(
+          /timed out.*org1\/repo.*branch 'main'.*expected commit 'pushed-commit'.*stage 'file contents'.*probe path 'README.md'.*5000ms.*HTTP 500.*still indexing/,
+        ),
+      }),
+    );
+    expect(getContents.mock.calls.length).toBeLessThanOrEqual(21);
+  });
+
+  it('accepts a verified fileless repository without a file probe', async () => {
+    const clientInstance = client({
+      getRecursiveTree: jest.fn().mockResolvedValue({
+        tree: [],
+        truncated: false,
+      }),
+    } as Partial<GiteaClient>);
+    await expect(run(clientInstance)).resolves.toBeUndefined();
+    expect(clientInstance.getContents).not.toHaveBeenCalled();
+  });
+
+  it('does not accept a truncated tree without a usable blob', async () => {
+    const clientInstance = client({
+      getRecursiveTree: jest.fn().mockResolvedValue({
+        tree: [],
+        truncated: true,
+      }),
+    } as Partial<GiteaClient>);
+    const result = run(clientInstance);
+    const rejection = result.catch(error => error);
+    await jest.advanceTimersByTimeAsync(5_000);
+    expect(await rejection).toEqual(
+      expect.objectContaining({
+        message: expect.stringMatching(/timed out.*stage 'tree'.*truncated/),
+      }),
+    );
+  });
+
+  it('honors cancellation during a transient API failure', async () => {
+    const controller = new AbortController();
+    const getBranch = jest.fn().mockRejectedValue(new TypeError('fetch failed'));
+
+    const result = run(
+      client({ getBranch } as Partial<GiteaClient>),
+      controller.signal,
+    );
+    await Promise.resolve();
+    controller.abort();
+    await expect(result).rejects.toThrow(/cancelled.*org1\/repo|cancelled/);
+    expect(getBranch).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('publish:gitea', () => {
@@ -61,14 +221,36 @@ describe('publish:gitea', () => {
     },
   });
 
-  const server = setupServer();
+  const server = setupServer(
+    rest.get(
+      'https://gitea.com/api/v1/repos/:owner/:repo/branches/:branch',
+      (_req, res, ctx) =>
+        res(
+          ctx.status(200),
+          ctx.json({
+            commit: { id: '220f19cc36b551763d157f1b5e4a4b446165dbd6' },
+          }),
+        ),
+    ),
+    rest.get(
+      'https://gitea.com/api/v1/repos/:owner/:repo/git/trees/:ref',
+      (_req, res, ctx) =>
+        res(ctx.status(200), ctx.json({ tree: [], truncated: false })),
+    ),
+  );
   registerMswTestHooks(server);
 
   beforeEach(() => {
     jest.resetAllMocks();
+    (initRepoAndPush as jest.Mock).mockResolvedValue({
+      commitHash: '220f19cc36b551763d157f1b5e4a4b446165dbd6',
+    });
   });
 
-  const mockSuccessfulPublish = (owner = 'org1') => {
+  const mockSuccessfulPublish = (
+    owner = 'org1',
+    onHtmlRequest?: () => void,
+  ) => {
     server.use(
       rest.get(`https://gitea.com/api/v1/orgs/${owner}`, (_req, res, ctx) => {
         return res(
@@ -86,6 +268,7 @@ describe('publish:gitea', () => {
       rest.get(
         `https://gitea.com/${owner}/repo/src/branch/main`,
         (_req, res, ctx) => {
+          onHtmlRequest?.();
           return res(
             ctx.status(200),
             ctx.set('Content-Type', 'application/json'),
@@ -107,6 +290,72 @@ describe('publish:gitea', () => {
       }),
     );
   };
+
+  it('waits for an authenticated file-specific read without polling HTML or repeating the push', async () => {
+    let htmlRequests = 0;
+    let fileRequests = 0;
+    mockSuccessfulPublish('org1', () => {
+      htmlRequests += 1;
+    });
+    server.use(
+      rest.get(
+        'https://gitea.com/api/v1/repos/org1/repo/git/trees/:ref',
+        (_req, res, ctx) =>
+          res(
+            ctx.json({
+              tree: [{ type: 'blob', path: 'nested/example.txt' }],
+              truncated: false,
+            }),
+          ),
+      ),
+      rest.get(
+        'https://gitea.com/api/v1/repos/org1/repo/contents/nested/example.txt',
+        (req, res, ctx) => {
+          fileRequests += 1;
+          expect(req.url.searchParams.get('ref')).toBe('main');
+          expect(req.headers.get('Authorization')).toBe('token user-token');
+          return fileRequests === 1
+            ? res(ctx.status(500), ctx.text('still indexing'))
+            : res(ctx.status(200), ctx.json({ sha: 'blob-sha' }));
+        },
+      ),
+    );
+
+    const ctx = createMockActionContext({
+      input: {
+        repoUrl: 'gitea.com?repo=repo&owner=org1',
+        description,
+        protectDefaultBranch: false,
+        token: 'user-token',
+      },
+    });
+    await action.handler(ctx);
+
+    expect(initRepoAndPush).toHaveBeenCalledTimes(1);
+    expect(htmlRequests).toBe(0);
+    expect(fileRequests).toBe(2);
+    expect(ctx.output).toHaveBeenCalledWith(
+      'repoContentsUrl',
+      'https://gitea.com/org1/repo/src/branch/main/',
+    );
+  });
+
+  it('fails clearly when the push does not return a commit hash', async () => {
+    mockSuccessfulPublish();
+    (initRepoAndPush as jest.Mock).mockResolvedValueOnce({});
+    const ctx = createMockActionContext({
+      input: {
+        repoUrl: 'gitea.com?repo=repo&owner=org1',
+        description,
+        protectDefaultBranch: false,
+      },
+    });
+
+    await expect(action.handler(ctx)).rejects.toThrow(
+      /org1\/repo branch 'main'.*did not return a commit hash/,
+    );
+    expect(ctx.output).not.toHaveBeenCalled();
+  });
 
   it('should throw an error when the repoUrl is not well formed', async () => {
     await expect(

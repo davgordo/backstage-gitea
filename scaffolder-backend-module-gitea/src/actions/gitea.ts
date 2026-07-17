@@ -30,7 +30,14 @@ import {
 } from '@backstage/plugin-scaffolder-node';
 import { examples } from './gitea.examples';
 import { applyBranchProtection, BranchProtectionOptions } from './giteaBranchProtection';
-import { GiteaClient, GiteaPermission, GiteaTeam, resolveGiteaRepo } from './giteaClient';
+import {
+  GiteaApiError,
+  GiteaClient,
+  GiteaPermission,
+  GiteaRepo,
+  GiteaTeam,
+  resolveGiteaRepo,
+} from './giteaClient';
 import crypto from 'node:crypto';
 
 type GiteaCollaborator =
@@ -58,6 +65,191 @@ const permissionMap: Record<string, GiteaPermission> = {
   write: 'write',
   admin: 'admin',
 };
+
+const CONTENTS_READINESS_RETRY_MS = 250;
+const CONTENTS_READINESS_TIMEOUT_MS = 5_000;
+
+function readinessError(options: {
+  repo: GiteaRepo;
+  branch: string;
+  expectedCommit: string;
+  stage: string;
+  endpoint: string;
+  probePath?: string;
+  finalError: unknown;
+  timedOut: boolean;
+}): Error {
+  const {
+    repo,
+    branch,
+    expectedCommit,
+    stage,
+    endpoint,
+    probePath,
+    finalError,
+    timedOut,
+  } = options;
+  let reason: string;
+  if (finalError instanceof GiteaApiError) {
+    reason = `HTTP ${finalError.status}: ${finalError.message}`;
+  } else if (finalError instanceof Error) {
+    reason = finalError.message;
+  } else {
+    reason = String(finalError);
+  }
+  return new Error(
+    `Gitea repository contents readiness ${timedOut ? 'timed out' : 'failed'} for ` +
+      `${repo.owner}/${repo.repo} branch '${branch}', expected commit '${expectedCommit}', ` +
+      `stage '${stage}'${probePath ? `, probe path '${probePath}'` : ''}, endpoint ${endpoint}, after a maximum of ` +
+      `${CONTENTS_READINESS_TIMEOUT_MS}ms; final error: ${reason}`,
+  );
+}
+
+class GiteaReadinessStateError extends Error {}
+
+async function waitForRetry(signal?: AbortSignal, delay = CONTENTS_READINESS_RETRY_MS) {
+  if (signal?.aborted) {
+    throw new Error('Gitea repository contents readiness check was cancelled');
+  }
+  await new Promise<void>((resolve, reject) => {
+    const state: { timer?: ReturnType<typeof setTimeout> } = {};
+    const onAbort = () => {
+      if (state.timer) clearTimeout(state.timer);
+      reject(new Error('Gitea repository contents readiness check was cancelled'));
+    };
+    state.timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, delay);
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
+export async function waitForGiteaRepositoryContents(options: {
+  client: GiteaClient;
+  repo: GiteaRepo;
+  branch: string;
+  expectedCommit: string;
+  signal?: AbortSignal;
+  logger: { info(message: string): void };
+}): Promise<void> {
+  const { client, repo, branch, expectedCommit, signal, logger } = options;
+  const repoApiPath = `/repos/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.repo)}`;
+  const deadline = Date.now() + CONTENTS_READINESS_TIMEOUT_MS;
+  let finalError: unknown;
+  let stage = 'branch';
+  let probePath: string | undefined;
+  let endpoint = `${repo.apiBaseUrl}${repoApiPath}/branches/${encodeURIComponent(branch)}`;
+
+  for (;;) {
+    if (signal?.aborted) {
+      throw new Error(
+        `Gitea repository contents readiness check was cancelled for ${repo.owner}/${repo.repo} branch '${branch}', expected commit '${expectedCommit}', stage '${stage}' at ${endpoint}`,
+      );
+    }
+    try {
+      stage = 'branch';
+      probePath = undefined;
+      endpoint = `${repo.apiBaseUrl}${repoApiPath}/branches/${encodeURIComponent(branch)}`;
+      const branchResponse = await client.getBranch(branch, signal);
+      const observedCommit =
+        branchResponse.commit?.id ?? branchResponse.commit?.sha;
+      if (!observedCommit) {
+        throw new GiteaReadinessStateError(
+          `branch did not return a commit SHA; expected '${expectedCommit}'`,
+        );
+      }
+      if (observedCommit !== expectedCommit) {
+        throw new GiteaReadinessStateError(
+          `branch resolved to commit '${observedCommit}'; expected '${expectedCommit}'`,
+        );
+      }
+
+      stage = 'tree';
+      endpoint = `${repo.apiBaseUrl}${repoApiPath}/git/trees/${encodeURIComponent(expectedCommit)}?recursive=true`;
+      const tree = await client.getRecursiveTree(expectedCommit, signal);
+      probePath = (tree.tree ?? [])
+        .filter(entry => entry.type === 'blob' && Boolean(entry.path))
+        .map(entry => entry.path!)
+        .sort()[0];
+      if (!probePath) {
+        if (tree.truncated) {
+          throw new GiteaReadinessStateError(
+            'recursive tree was truncated and contained no usable blob path',
+          );
+        }
+        return;
+      }
+
+      stage = 'file contents';
+      const encodedProbePath = probePath
+        .split('/')
+        .map(segment => encodeURIComponent(segment))
+        .join('/');
+      endpoint = `${repo.apiBaseUrl}${repoApiPath}/contents/${encodedProbePath}?ref=${encodeURIComponent(branch)}`;
+      await client.getContents(probePath, branch, signal);
+      return;
+    } catch (error) {
+      finalError = error;
+      if (signal?.aborted) {
+        throw new Error(
+          `Gitea repository contents readiness check was cancelled for ${repo.owner}/${repo.repo} branch '${branch}', expected commit '${expectedCommit}', stage '${stage}' at ${endpoint}`,
+        );
+      }
+      if (
+        error instanceof GiteaApiError &&
+        error.status !== 404 &&
+        error.status !== 500
+      ) {
+        throw readinessError({
+          repo,
+          branch,
+          expectedCommit,
+          stage,
+          endpoint,
+          probePath,
+          finalError: error,
+          timedOut: false,
+        });
+      }
+      if (
+        !(error instanceof GiteaApiError) &&
+        !(error instanceof TypeError) &&
+        !(error instanceof GiteaReadinessStateError)
+      ) {
+        throw readinessError({
+          repo,
+          branch,
+          expectedCommit,
+          stage,
+          endpoint,
+          probePath,
+          finalError: error,
+          timedOut: false,
+        });
+      }
+      if (Date.now() >= deadline) {
+        throw readinessError({
+          repo,
+          branch,
+          expectedCommit,
+          stage,
+          endpoint,
+          probePath,
+          finalError,
+          timedOut: true,
+        });
+      }
+      logger.info(
+        `Gitea contents for ${repo.owner}/${repo.repo}:${branch} at expected commit ${expectedCommit} are not ready during ${stage}${probePath ? ` (${probePath})` : ''}: ${error}; retrying in ${CONTENTS_READINESS_RETRY_MS}ms`,
+      );
+      await waitForRetry(
+        signal,
+        Math.min(CONTENTS_READINESS_RETRY_MS, deadline - Date.now()),
+      );
+    }
+  }
+}
 
 function normalizeGiteaPermission(permission: string): GiteaPermission {
   const normalized = permissionMap[permission.toLowerCase()];
@@ -127,33 +319,6 @@ async function getGiteaOrganization(
 
   return (await response.json()) as GiteaOrganization;
 }
-
-const checkGiteaContentUrl = async (
-  config: GiteaIntegrationConfig,
-  options: {
-    owner?: string;
-    repo: string;
-    defaultBranch?: string;
-  },
-): Promise<Response> => {
-  const { owner, repo, defaultBranch } = options;
-  let response: Response;
-  const getOptions: RequestInit = {
-    method: 'GET',
-  };
-
-  try {
-    response = await fetch(
-      `${config.baseUrl}/${owner}/${repo}/src/branch/${defaultBranch}`,
-      getOptions,
-    );
-  } catch (e) {
-    throw new Error(
-      `Unable to get the repository: ${owner}/${repo} metadata , ${e}`,
-    );
-  }
-  return response;
-};
 
 function buildAuthHeaders(config: GiteaIntegrationConfig, token?: string): Record<string, string> {
   if (token) {
@@ -253,41 +418,6 @@ const generateCommitMessage = (
   }\n\nChange-Id: I${changeId}`;
   return msg;
 };
-
-async function checkAvailabilityGiteaRepository(
-  maxDuration: number,
-  integrationConfig: GiteaIntegrationConfig,
-  options: {
-    owner?: string;
-    repo: string;
-    defaultBranch: string;
-    ctx: ActionContext<any, any, any>;
-  },
-) {
-  const startTimestamp = Date.now();
-
-  const { owner, repo, defaultBranch, ctx } = options;
-  const sleep = (ms: number | undefined) => new Promise(r => setTimeout(r, ms));
-  let response: Response;
-
-  while (Date.now() - startTimestamp < maxDuration) {
-    if (ctx.signal?.aborted) return;
-
-    response = await checkGiteaContentUrl(integrationConfig, {
-      owner,
-      repo,
-      defaultBranch,
-    });
-
-    if (response.status !== 200) {
-      // Repository is not yet available/accessible ...
-      await sleep(1000);
-    } else {
-      // Gitea repository exists !
-      break;
-    }
-  }
-}
 
 async function addTeamAccess(options: {
   client: GiteaClient;
@@ -728,23 +858,29 @@ export function createPublishGiteaAction(options: {
         gitAuthorInfo,
         ...(signCommit ? { signingKey } : {}),
       });
+      if (!commitResult?.commitHash) {
+        throw new Error(
+          `Git push for ${owner}/${repo} branch '${defaultBranch}' did not return a commit hash; repository readiness cannot be verified`,
+        );
+      }
 
-      // Check if the gitea repo URL is available before to exit
-      const maxDuration = 20000; // 20 seconds
-      await checkAvailabilityGiteaRepository(
-        maxDuration,
-        integrationConfig.config,
-        {
-          owner,
-          repo,
-          defaultBranch,
-          ctx,
-        },
-      );
+      const repoData = resolveGiteaRepo({ repoUrl, integrations });
+      const authenticatedClient = new GiteaClient({
+        repo: repoData,
+        token,
+        defaultHeaders: getGiteaRequestOptions(integrationConfig.config).headers,
+      });
+      await waitForGiteaRepositoryContents({
+        client: authenticatedClient,
+        repo: repoData,
+        branch: defaultBranch,
+        expectedCommit: commitResult.commitHash,
+        signal: ctx.signal,
+        logger: ctx.logger,
+      });
 
       // Apply branch protection - defaults to enabled (matching GitHub behavior)
       if (protectDefaultBranch !== false) {
-        const repoData = resolveGiteaRepo({ repoUrl, integrations });
         const client = new GiteaClient({ repo: repoData, token: token || password });
 
         const protectionOptions: BranchProtectionOptions = {

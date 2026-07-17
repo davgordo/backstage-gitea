@@ -59,11 +59,30 @@ describe('publish:gitea', () => {
     },
   });
 
-  const server = setupServer();
+  const server = setupServer(
+    rest.get(
+      'https://gitea.com/api/v1/repos/:owner/:repo/branches/:branch',
+      (_req, res, ctx) =>
+        res(
+          ctx.status(200),
+          ctx.json({
+            commit: { id: '431f19cc36b551763d157f1b5e4a4b446165dbn2' },
+          }),
+        ),
+    ),
+    rest.get(
+      'https://gitea.com/api/v1/repos/:owner/:repo/git/trees/:ref',
+      (_req, res, ctx) =>
+        res(ctx.status(200), ctx.json({ tree: [], truncated: false })),
+    ),
+  );
   registerMswTestHooks(server);
 
   beforeEach(() => {
     jest.resetAllMocks();
+    (initRepoAndPush as jest.Mock).mockResolvedValue({
+      commitHash: '431f19cc36b551763d157f1b5e4a4b446165dbn2',
+    });
   });
 
   it(`should ${examples[0].description}`, async () => {

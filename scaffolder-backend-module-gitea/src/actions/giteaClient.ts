@@ -37,6 +37,40 @@ export type GiteaTeam = {
   slug?: string;
 };
 
+export type GiteaBatchFileOperation =
+  | { operation: 'create'; path: string; content: string }
+  | { operation: 'update'; path: string; content: string; sha: string }
+  | { operation: 'delete'; path: string; sha: string };
+
+export type GiteaBatchContentRequest = {
+  branch: string;
+  new_branch?: string;
+  message: string;
+  files: GiteaBatchFileOperation[];
+};
+
+export type GiteaBranchResponse = {
+  name?: string;
+  commit?: { id?: string; sha?: string };
+};
+
+export type GiteaGitTreeEntry = {
+  path?: string;
+  sha?: string;
+  type?: string;
+};
+
+export type GiteaGitTreeResponse = {
+  sha?: string;
+  tree?: GiteaGitTreeEntry[];
+  truncated?: boolean;
+};
+
+export type GiteaBatchContentResponse = {
+  commit?: { sha?: string };
+  files?: Array<{ path?: string; sha?: string }>;
+};
+
 export type ResolveGiteaRepoOptions = {
   repoUrl: string;
   integrations: ScmIntegrationRegistry;
@@ -145,6 +179,50 @@ export class GiteaClient {
     const encodedOwner = encodeURIComponent(this.repo.owner);
     const encodedRepo = encodeURIComponent(this.repo.repo);
     return `/repos/${encodedOwner}/${encodedRepo}${path}`;
+  }
+
+  async getBranch(
+    branch: string,
+    signal?: AbortSignal,
+  ): Promise<GiteaBranchResponse> {
+    return this.request(
+      this.repoPath(`/branches/${encodeURIComponent(branch)}`),
+      { signal },
+    );
+  }
+
+  async getRecursiveTree(
+    ref: string,
+    signal?: AbortSignal,
+  ): Promise<GiteaGitTreeResponse> {
+    return this.request(
+      `${this.repoPath(`/git/trees/${encodeURIComponent(ref)}`)}?recursive=true`,
+      { signal },
+    );
+  }
+
+  async getContents(
+    path: string,
+    ref: string,
+    signal?: AbortSignal,
+  ): Promise<unknown> {
+    const encodedPath = path
+      .split('/')
+      .map(segment => encodeURIComponent(segment))
+      .join('/');
+    return this.request(
+      `${this.repoPath(`/contents/${encodedPath}`)}?ref=${encodeURIComponent(ref)}`,
+      { signal },
+    );
+  }
+
+  async changeFiles(
+    request: GiteaBatchContentRequest,
+  ): Promise<GiteaBatchContentResponse> {
+    return this.request(this.repoPath('/contents'), {
+      method: 'POST',
+      body: JSON.stringify(request),
+    });
   }
 
   async addRepositoryCollaborator(
