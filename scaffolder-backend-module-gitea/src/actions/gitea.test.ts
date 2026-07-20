@@ -79,7 +79,7 @@ describe('waitForGiteaRepositoryContents', () => {
     jest.useRealTimers();
   });
 
-  it('retries a file-specific HTTP 500 and then succeeds', async () => {
+  it('silently retries a file-specific HTTP 500 and then succeeds', async () => {
     const getContents = jest
       .fn()
       .mockRejectedValueOnce(
@@ -96,6 +96,7 @@ describe('waitForGiteaRepositoryContents', () => {
       'main',
       undefined,
     );
+    expect(logger.info).not.toHaveBeenCalled();
     expect(initRepoAndPush).not.toHaveBeenCalled();
   });
 

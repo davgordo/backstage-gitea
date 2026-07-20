@@ -7,7 +7,7 @@ Packages the standard Gitea catalog module, enhanced scaffolder module, and GitH
 | Plugin | Source | Version (RHDH 1.10.1 / Backstage 1.49.4) |
 |---|---|---|
 | `@${GITEA_NPM_SCOPE}/plugin-catalog-backend-module-gitea-dynamic` | Upstream 0.1.10 from npmjs | 0.1.10-rhdh.1.10.1.1 |
-| `@${GITEA_NPM_SCOPE}/plugin-scaffolder-backend-module-gitea-dynamic` | Local custom source based on upstream 0.2.19 | 0.2.19-rhdh.1.10.1.6 |
+| `@${GITEA_NPM_SCOPE}/plugin-scaffolder-backend-module-gitea-dynamic` | Local custom source based on upstream 0.2.19 | 0.2.19-rhdh.1.10.1.7 |
 | `@${GITEA_NPM_SCOPE}/plugin-catalog-backend-module-gitea-github-compat-dynamic` | Local Template compatibility module | 0.1.0-rhdh.1.10.1.2 |
 
 All three packages have `@backstage/*` dependencies migrated to `peerDependencies` for RHDH compatibility.

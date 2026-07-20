@@ -133,7 +133,7 @@ export async function waitForGiteaRepositoryContents(options: {
   signal?: AbortSignal;
   logger: { info(message: string): void };
 }): Promise<void> {
-  const { client, repo, branch, expectedCommit, signal, logger } = options;
+  const { client, repo, branch, expectedCommit, signal } = options;
   const repoApiPath = `/repos/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.repo)}`;
   const deadline = Date.now() + CONTENTS_READINESS_TIMEOUT_MS;
   let finalError: unknown;
@@ -240,9 +240,6 @@ export async function waitForGiteaRepositoryContents(options: {
           timedOut: true,
         });
       }
-      logger.info(
-        `Gitea contents for ${repo.owner}/${repo.repo}:${branch} at expected commit ${expectedCommit} are not ready during ${stage}${probePath ? ` (${probePath})` : ''}: ${error}; retrying in ${CONTENTS_READINESS_RETRY_MS}ms`,
-      );
       await waitForRetry(
         signal,
         Math.min(CONTENTS_READINESS_RETRY_MS, deadline - Date.now()),
